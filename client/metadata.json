@@ -1,0 +1,8 @@
+{
+  "name": "AceMock AI - Professional Interview Platform",
+  "description": "An AI-powered mock interview platform that simulates real-world interview scenarios using Gemini AI, offering real-time evaluation, video recording, and personalized feedback.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

@@ -1,0 +1,84 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum InterviewStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+model User {
+  id        Int       @id @default(autoincrement())
+  name      String
+  email     String    @unique
+  password  String
+  createdAt DateTime  @default(now()) @map("created_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  interviews Interview[]
+
+  @@map("users")
+}
+
+model Interview {
+  id         Int            @id @default(autoincrement())
+  userId     Int            @map("user_id")
+  role       String
+  experience String
+  techStack  Json           @map("tech_stack")
+  status     InterviewStatus @default(IN_PROGRESS)
+  createdAt  DateTime       @default(now()) @map("created_at")
+  completedAt DateTime?     @map("completed_at")
+
+  user       User           @relation(fields: [userId], references: [id])
+  questions  Question[]
+  result     Result?
+
+  @@index([userId])
+  @@map("interviews")
+}
+
+model Question {
+  id          Int       @id @default(autoincrement())
+  interviewId Int       @map("interview_id")
+  questionText String   @map("question_text")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  interview   Interview @relation(fields: [interviewId], references: [id])
+  answers     Answer[]
+
+  @@index([interviewId])
+  @@map("questions")
+}
+
+model Answer {
+  id         Int      @id @default(autoincrement())
+  questionId Int      @map("question_id")
+  answerText String   @map("answer_text")
+  score      Int?
+  feedback   String?  @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  question   Question @relation(fields: [questionId], references: [id])
+
+  @@index([questionId])
+  @@map("answers")
+}
+
+model Result {
+  id           Int      @id @default(autoincrement())
+  interviewId  Int      @unique @map("interview_id")
+  overallScore Int      @map("overall_score")
+  summary      String   @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  interview Interview @relation(fields: [interviewId], references: [id])
+
+  @@map("results")
+}
+
