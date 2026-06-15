@@ -4,6 +4,7 @@ import { ApiError } from "../middleware/error.middleware";
 import {
   addOrGenerateQuestion,
   completeInterview,
+  deleteInterview,
   getInterviewDetails,
   getInterviewHistory,
   saveAnswerWithEvaluation,
@@ -96,6 +97,18 @@ export const question = async (
         id: q.id,
         interviewId: q.interview_id,
         questionText: q.question_text,
+        expectedAnswer: (q as any).expected_answer ?? null,
+        keyConcepts: Array.isArray((q as any).key_concepts)
+          ? (q as any).key_concepts
+          : (() => {
+              try {
+                return JSON.parse((q as any).key_concepts ?? "[]");
+              } catch {
+                return [];
+              }
+            })(),
+        difficulty: (q as any).difficulty ?? null,
+        topic: (q as any).topic ?? null,
         type: (q as any).question_type === "coding" ? "coding" : "theory",
         createdAt: q.created_at,
       },
@@ -117,8 +130,18 @@ export const answer = async (
     if (!Number.isFinite(interviewId))
       throw new ApiError(400, "Invalid interview id");
 
-    const answerText = String(req.body?.answerText ?? "").trim();
-    const code =
+    const requestedType =
+      req.body?.type === "coding" || req.body?.type === "theory"
+        ? (req.body.type as "coding" | "theory")
+        : undefined;
+
+    const difficulty =
+      req.body?.difficulty === "easy" || req.body?.difficulty === "medium" || req.body?.difficulty === "hard"
+        ? (req.body.difficulty as "easy" | "medium" | "hard")
+        : undefined;
+
+    let answerText = String(req.body?.answerText ?? "").trim();
+    let code =
       typeof req.body?.code === "string" && req.body.code.trim()
         ? String(req.body.code)
         : undefined;
@@ -135,6 +158,30 @@ export const answer = async (
         ? req.body.questionText
         : undefined;
 
+    const question =
+      typeof req.body?.question === "string" && req.body.question.trim()
+        ? String(req.body.question)
+        : undefined;
+
+    const userAnswer =
+      typeof req.body?.userAnswer === "string" && req.body.userAnswer.trim()
+        ? String(req.body.userAnswer)
+        : undefined;
+
+    if (!answerText && userAnswer && requestedType !== "coding") {
+      answerText = userAnswer.trim();
+    }
+    if (!code && userAnswer && requestedType === "coding") {
+      code = userAnswer;
+    }
+
+    const correctAnswer =
+      typeof req.body?.correctAnswer === "string" && req.body.correctAnswer.trim()
+        ? String(req.body.correctAnswer)
+        : undefined;
+
+    const testCases = Array.isArray(req.body?.testCases) ? req.body.testCases : undefined;
+
     if (!answerText && !code) throw new ApiError(400, "answerText or code is required");
 
     if (
@@ -150,8 +197,11 @@ export const answer = async (
       answerText,
       code,
       language,
+      difficulty,
+      correctAnswer,
+      testCases,
       questionId,
-      questionText,
+      questionText: questionText ?? question,
     });
 
     console.info("[interview] answer", {
@@ -167,8 +217,29 @@ export const answer = async (
         questionId: result.answer.question_id,
         answerText: result.answer.answer_text,
         score: result.answer.score,
+        technicalAccuracy: (result.answer as any).technical_accuracy ?? null,
+        conceptCoverage: (result.answer as any).concept_coverage ?? null,
+        communicationScore: (result.answer as any).communication_score ?? null,
+        semanticSimilarity: (result.answer as any).semantic_similarity ?? null,
+        finalScore: (result.answer as any).final_score ?? null,
+        matchedConcepts: (() => {
+          try {
+            return JSON.parse((result.answer as any).matched_concepts ?? "[]");
+          } catch {
+            return [];
+          }
+        })(),
+        missingConcepts: (() => {
+          try {
+            return JSON.parse((result.answer as any).missing_concepts ?? "[]");
+          } catch {
+            return [];
+          }
+        })(),
         rating: (result.answer as any).rating ?? null,
         feedback: result.answer.feedback,
+        strengths: (result.answer as any).strengths ?? null,
+        weaknesses: (result.answer as any).weaknesses ?? null,
         createdAt: result.answer.created_at,
       },
       evaluation: result.evaluation,
@@ -254,6 +325,30 @@ export const history = async (
     });
 
     res.json(data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const remove = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    if (!req.user) throw new ApiError(401, "Unauthorized");
+
+    const interviewId = Number(req.params.id);
+    if (!Number.isFinite(interviewId))
+      throw new ApiError(400, "Invalid interview id");
+
+    await deleteInterview({
+      interviewId,
+      userId: req.user.id,
+    });
+
+    console.info("[interview] delete", { userId: req.user.id, interviewId });
+    res.json({ deleted: true });
   } catch (err) {
     next(err);
   }

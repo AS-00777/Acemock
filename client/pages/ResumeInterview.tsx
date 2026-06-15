@@ -93,8 +93,8 @@ const ResumeInterview: React.FC = () => {
     <Layout>
       <div className="max-w-4xl mx-auto px-4 py-16 transition-colors duration-200">
         <div className="text-center mb-12">
-          <h1 className="text-4xl font-black text-slate-900 dark:text-slate-100 mb-4 font-poppins">Interview by Resume</h1>
-          <p className="text-slate-500 dark:text-slate-400 text-lg font-medium max-w-xl mx-auto">
+          <h1 className="text-4xl font-black text-slate-900 dark:text-neutral-100 mb-4 font-poppins">Interview by Resume</h1>
+          <p className="text-slate-500 dark:text-neutral-400 text-lg font-medium max-w-xl mx-auto">
             Upload your professional profile. Our AI will analyze your experience and skills to create a bespoke interview journey.
           </p>
         </div>
@@ -105,17 +105,17 @@ const ResumeInterview: React.FC = () => {
               onDragOver={onDragOver}
               onDragLeave={onDragLeave}
               onDrop={onDrop}
-              className={`relative bg-white dark:bg-slate-800 border-4 border-dashed rounded-[3rem] p-12 transition-all group flex flex-col items-center justify-center text-center ${
-                isDragging ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 scale-[1.01]' : 'border-slate-100 dark:border-slate-700 hover:border-blue-200 dark:hover:border-blue-800'
+              className={`relative bg-white dark:bg-neutral-900 border-4 border-dashed rounded-[3rem] p-12 transition-all group flex flex-col items-center justify-center text-center ${
+                isDragging ? 'border-blue-500 bg-blue-50 dark:bg-neutral-800 scale-[1.01]' : 'border-slate-100 dark:border-neutral-800 hover:border-blue-200 dark:hover:border-blue-800'
               } ${file ? 'border-emerald-200 dark:border-emerald-900/50' : ''}`}
             >
               {!file && !uploading && (
                 <>
-                  <div className="w-24 h-24 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                  <div className="w-24 h-24 bg-blue-50 dark:bg-neutral-800 text-blue-600 dark:text-blue-400 rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
                     <Icons.CloudUpload />
                   </div>
-                  <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-2">Drag & Drop Resume</h3>
-                  <p className="text-slate-400 dark:text-slate-500 mb-8 font-medium">Supports PDF, DOC, DOCX up to 5MB</p>
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-neutral-100 mb-2">Drag & Drop Resume</h3>
+                  <p className="text-slate-400 dark:text-neutral-400 mb-8 font-medium">Supports PDF, DOC, DOCX up to 5MB</p>
                   
                   <button 
                     onClick={() => fileInputRef.current?.click()}
@@ -135,14 +135,14 @@ const ResumeInterview: React.FC = () => {
 
               {uploading && (
                 <div className="w-full max-w-sm">
-                  <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-4">Parsing Resume Content...</h3>
-                  <div className="w-full bg-slate-100 dark:bg-slate-700 h-4 rounded-full overflow-hidden mb-2">
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-neutral-100 mb-4">Parsing Resume Content...</h3>
+                  <div className="w-full bg-slate-100 dark:bg-neutral-800 h-4 rounded-full overflow-hidden mb-2">
                     <div 
                       className="bg-blue-600 h-full transition-all duration-300"
                       style={{ width: `${progress}%` }}
                     ></div>
                   </div>
-                  <div className="flex justify-between text-xs font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">
+                  <div className="flex justify-between text-xs font-black text-slate-400 dark:text-neutral-400 uppercase tracking-widest">
                     <span>{progress}%</span>
                     <span>Gemini AI Analyzing</span>
                   </div>
@@ -154,7 +154,7 @@ const ResumeInterview: React.FC = () => {
                   <div className="w-20 h-20 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mb-6 mx-auto">
                     <Icons.Resume />
                   </div>
-                  <h3 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-1">{file.name}</h3>
+                  <h3 className="text-2xl font-bold text-slate-900 dark:text-neutral-100 mb-1">{file.name}</h3>
                   <p className="text-emerald-600 dark:text-emerald-400 font-bold text-sm mb-6 flex items-center justify-center gap-2">
                     <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
                     Ready for Analysis
@@ -162,7 +162,7 @@ const ResumeInterview: React.FC = () => {
                   
                   <button 
                     onClick={() => { setFile(null); setExtractedSkills([]); }}
-                    className="text-slate-400 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 font-bold text-sm transition-colors"
+                    className="text-slate-400 dark:text-neutral-400 hover:text-red-500 dark:hover:text-red-400 font-bold text-sm transition-colors"
                   >
                     Change File
                   </button>
@@ -179,8 +179,8 @@ const ResumeInterview: React.FC = () => {
           </div>
 
           <div className="space-y-6">
-            <div className="bg-white dark:bg-slate-800 rounded-[2.5rem] border border-slate-100 dark:border-slate-700 p-8 shadow-sm transition-colors h-full">
-              <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-6">Extraction Preview</h4>
+            <div className="bg-white dark:bg-neutral-900 rounded-[2.5rem] border border-slate-100 dark:border-neutral-800 p-8 shadow-sm transition-colors h-full">
+              <h4 className="text-[10px] font-black text-slate-400 dark:text-neutral-400 uppercase tracking-widest mb-6">Extraction Preview</h4>
               
               {extractedSkills.length > 0 ? (
                 <div className="space-y-6">
@@ -191,14 +191,14 @@ const ResumeInterview: React.FC = () => {
                       </span>
                     ))}
                   </div>
-                  <div className="pt-6 border-t border-slate-50 dark:border-slate-700">
-                    <p className="text-sm text-slate-500 dark:text-slate-400 font-medium leading-relaxed mb-6">
+                  <div className="pt-6 border-t border-slate-50 dark:border-neutral-800">
+                    <p className="text-sm text-slate-500 dark:text-neutral-400 font-medium leading-relaxed mb-6">
                       Our AI detected these core competencies. The interview questions will focus on real-world applications of these skills.
                     </p>
                     <button 
                       onClick={handleStartInterview}
                       disabled={loadingQuestions}
-                      className="w-full bg-slate-900 dark:bg-slate-700 text-white py-4 rounded-2xl font-bold hover:bg-black dark:hover:bg-slate-600 transition shadow-xl dark:shadow-none active:scale-95 disabled:opacity-50 flex items-center justify-center gap-3"
+                      className="w-full bg-slate-900 dark:bg-neutral-800 text-white py-4 rounded-2xl font-bold hover:bg-black dark:hover:bg-neutral-700 transition shadow-xl dark:shadow-none active:scale-95 disabled:opacity-50 flex items-center justify-center gap-3"
                     >
                       {loadingQuestions ? (
                         <>
@@ -224,9 +224,9 @@ const ResumeInterview: React.FC = () => {
           </div>
         </div>
 
-        <div className="mt-16 bg-blue-50/50 dark:bg-blue-900/10 rounded-[3rem] p-10 border border-blue-100 dark:border-blue-900/20 transition-colors">
+        <div className="mt-16 bg-blue-50/50 dark:bg-neutral-900 rounded-[3rem] p-10 border border-blue-100 dark:border-neutral-800 transition-colors">
           <h4 className="text-blue-700 dark:text-blue-400 font-black text-xs uppercase tracking-widest mb-4">Architecture Insight</h4>
-          <p className="text-blue-900/70 dark:text-slate-400 text-sm font-medium leading-relaxed">
+          <p className="text-blue-900/70 dark:text-neutral-400 text-sm font-medium leading-relaxed">
             This module is built for scalability. The UI is decoupled from the storage layer. 
             When migrating to a live backend, simply swap the <code>startUploadSimulation</code> function for 
             a Firebase SDK <code>uploadBytesResumable</code> call and a PostgreSQL API endpoint to store the file URL against 

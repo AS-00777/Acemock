@@ -1,20 +1,19 @@
 import React from "react";
 import { Navigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
+import { useAuth } from "@clerk/clerk-react";
 
-const PrivateRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
-  const { ready, token } = useAuth();
+const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
+  const { isLoaded, isSignedIn } = useAuth();
 
-  if (!ready) {
-    return (
-      <div className="min-h-[60vh] flex items-center justify-center">
-        <div className="animate-spin w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full"></div>
-      </div>
-    );
+  if (!isLoaded) {
+    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
   }
 
-  return token ? children : <Navigate to="/login" />;
+  if (!isSignedIn) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return <>{children}</>;
 };
 
 export default PrivateRoute;
-

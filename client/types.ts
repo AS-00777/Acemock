@@ -38,6 +38,10 @@ export interface Question {
   question: string;
   is_coding: boolean;
   ideal_answer?: string;
+  expectedAnswer?: string;
+  keyConcepts?: string[];
+  difficulty?: string;
+  topic?: string;
   boilerplate?: string;
 }
 
@@ -61,6 +65,12 @@ export interface AnswerRecord {
   userAnswer: string;
   feedback?: string;
   score?: number;
+  technicalAccuracy?: number;
+  conceptCoverage?: number;
+  communicationScore?: number;
+  semanticSimilarity?: number;
+  matchedConcepts?: string[];
+  missingConcepts?: string[];
   codingAnswer?: string;
 }
 

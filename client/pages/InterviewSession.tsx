@@ -479,7 +479,7 @@ export default function InterviewSession() {
               </button>
               <button
                 onClick={() => setError(null)}
-                className="px-3 py-2 rounded-xl bg-white/70 dark:bg-slate-900/30 text-slate-600 dark:text-slate-200 text-xs font-black uppercase"
+                className="px-3 py-2 rounded-xl bg-white/70 dark:bg-neutral-950/30 text-slate-600 dark:text-neutral-200 text-xs font-black uppercase"
               >
                 Dismiss
               </button>
@@ -489,14 +489,14 @@ export default function InterviewSession() {
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-slate-900 dark:bg-slate-700 text-white flex items-center justify-center font-black">
+            <div className="w-11 h-11 rounded-2xl bg-slate-900 dark:bg-neutral-800 text-white flex items-center justify-center font-black">
               AM
             </div>
             <div>
-              <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
+              <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 dark:text-neutral-400">
                 Interview Session
               </div>
-              <div className="text-xl font-black text-slate-900 dark:text-slate-100 font-poppins">
+              <div className="text-xl font-black text-slate-900 dark:text-neutral-100 font-poppins">
                 Question {questionNumber} of {MAX_QUESTIONS}
               </div>
             </div>
@@ -511,14 +511,14 @@ export default function InterviewSession() {
               className={`px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border transition-colors ${
                 voiceEnabled
                   ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-200 border-emerald-100 dark:border-emerald-900/30"
-                  : "bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-200 border-slate-100 dark:border-slate-700"
+                  : "bg-slate-50 dark:bg-neutral-900 text-slate-600 dark:text-neutral-200 border-slate-100 dark:border-neutral-800"
               }`}
             >
               Voice {voiceEnabled ? "On" : "Off"}
             </button>
             <button
               onClick={() => speakQuestion(currentQText)}
-              className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-100 dark:border-slate-700 flex items-center gap-2"
+              className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-50 dark:bg-neutral-900 text-slate-700 dark:text-neutral-200 border border-slate-100 dark:border-neutral-800 flex items-center gap-2"
             >
               <Icons.Replay /> Replay
             </button>
@@ -526,9 +526,9 @@ export default function InterviewSession() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <section className="bg-white dark:bg-slate-800 rounded-[2.5rem] border border-slate-100 dark:border-slate-700 shadow-sm p-6 sm:p-8">
+          <section className="bg-white dark:bg-neutral-900 rounded-[2.5rem] border border-slate-100 dark:border-neutral-800 shadow-sm p-6 sm:p-8">
             <div className="flex items-center justify-between mb-5">
-              <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
+              <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-neutral-400">
                 Camera
               </div>
               <div className="flex items-center gap-2">
@@ -537,7 +537,7 @@ export default function InterviewSession() {
                   className={`px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border ${
                     cameraEnabled
                       ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-200 border-emerald-100 dark:border-emerald-900/30"
-                      : "bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-200 border-slate-100 dark:border-slate-700"
+                      : "bg-slate-50 dark:bg-neutral-950 text-slate-600 dark:text-neutral-200 border-slate-100 dark:border-neutral-800"
                   }`}
                 >
                   {cameraEnabled ? "Cam On" : "Cam Off"}
@@ -547,7 +547,7 @@ export default function InterviewSession() {
                   className={`px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border ${
                     micEnabled
                       ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-200 border-emerald-100 dark:border-emerald-900/30"
-                      : "bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-200 border-slate-100 dark:border-slate-700"
+                      : "bg-slate-50 dark:bg-neutral-950 text-slate-600 dark:text-neutral-200 border-slate-100 dark:border-neutral-800"
                   }`}
                 >
                   {micEnabled ? "Mic On" : "Mic Off"}
@@ -555,7 +555,7 @@ export default function InterviewSession() {
               </div>
             </div>
 
-            <div className="relative rounded-3xl overflow-hidden border border-slate-100 dark:border-slate-700 bg-slate-900">
+            <div className="relative rounded-3xl overflow-hidden border border-slate-100 dark:border-neutral-800 bg-slate-900">
               <video
                 ref={(el) => {
                   videoElRef.current = el;
@@ -578,28 +578,28 @@ export default function InterviewSession() {
               )}
             </div>
 
-            <div className="mt-6 rounded-3xl border border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 p-5">
+            <div className="mt-6 rounded-3xl border border-slate-100 dark:border-neutral-800 bg-slate-50 dark:bg-neutral-950 p-5">
               <div className="flex items-center justify-between">
-                <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-neutral-400">
                   Timer
                 </div>
-                <div className="text-sm font-black text-slate-900 dark:text-slate-100 tabular-nums">
+                <div className="text-sm font-black text-slate-900 dark:text-neutral-100 tabular-nums">
                   00:{String(timeLeft).padStart(2, "0")}
                 </div>
               </div>
-              <div className="mt-3 h-2 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+              <div className="mt-3 h-2 rounded-full bg-slate-200 dark:bg-neutral-900 overflow-hidden">
                 <div className="h-full bg-blue-600 transition-[width] duration-300" style={{ width: `${timerPct}%` }} />
               </div>
               <div className="mt-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                 <button
                   onClick={() => setIsTimerActive((v) => !v)}
-                  className="flex-1 py-3 rounded-2xl bg-slate-900 dark:bg-slate-700 text-white font-black text-xs uppercase tracking-widest"
+                  className="flex-1 py-3 rounded-2xl bg-slate-900 dark:bg-neutral-800 text-white font-black text-xs uppercase tracking-widest"
                 >
                   {isTimerActive ? "Pause" : "Start"}
                 </button>
                 <button
                   onClick={() => setTimeLeft(DEFAULT_SECONDS)}
-                  className="py-3 px-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-black text-xs uppercase tracking-widest"
+                  className="py-3 px-4 rounded-2xl bg-white dark:bg-neutral-900 border border-slate-100 dark:border-neutral-800 text-slate-700 dark:text-neutral-200 font-black text-xs uppercase tracking-widest"
                 >
                   Reset
                 </button>
@@ -607,9 +607,9 @@ export default function InterviewSession() {
             </div>
           </section>
 
-          <section className="bg-white dark:bg-slate-800 rounded-[2.5rem] border border-slate-100 dark:border-slate-700 shadow-sm p-6 sm:p-8">
+          <section className="bg-white dark:bg-neutral-900 rounded-[2.5rem] border border-slate-100 dark:border-neutral-800 shadow-sm p-6 sm:p-8">
             <div className="flex items-start justify-between gap-4 mb-6">
-              <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
+              <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-neutral-400">
                 Question
               </div>
               {scorePercent !== null && (
@@ -619,24 +619,24 @@ export default function InterviewSession() {
               )}
             </div>
 
-            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-slate-100 leading-snug font-poppins">
+            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-neutral-100 leading-snug font-poppins">
               {currentQText}
             </h2>
 
             {currentQuestion?.type === "coding" ? (
               <div className="mt-8 space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-neutral-400">
                     Code Editor
                   </div>
                   <div className="flex items-center gap-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-neutral-400">
                       Language
                     </label>
                     <select
                       value={language}
                       onChange={(e) => setLanguage(e.target.value as any)}
-                      className="bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 dark:text-slate-100"
+                      className="bg-slate-50 dark:bg-neutral-950 border border-slate-100 dark:border-neutral-800 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 dark:text-neutral-100"
                     >
                       {LANGUAGES.map((l) => (
                         <option key={l} value={l}>
@@ -656,24 +656,24 @@ export default function InterviewSession() {
                 />
 
                 <div>
-                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-2">
+                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-neutral-400 mb-2">
                     Explanation (optional)
                   </div>
                   <textarea
                     value={answerText}
                     onChange={(e) => setAnswerText(e.target.value)}
-                    className="w-full h-24 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-700 rounded-3xl px-5 py-4 outline-none text-sm font-semibold text-slate-900 dark:text-slate-100 resize-none"
+                    className="w-full h-24 bg-slate-50 dark:bg-neutral-950 border border-slate-100 dark:border-neutral-800 rounded-3xl px-5 py-4 outline-none text-sm font-semibold text-slate-900 dark:text-neutral-100 resize-none"
                     placeholder="Explain your approach, complexity, tradeoffs, and edge cases..."
                   />
                 </div>
               </div>
             ) : (
               <div className="mt-8 space-y-4">
-                <div className="bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-700 rounded-3xl p-5">
-                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-2">
+                <div className="bg-slate-50 dark:bg-neutral-950 border border-slate-100 dark:border-neutral-800 rounded-3xl p-5">
+                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-neutral-400 mb-2">
                     Verbal Answer Preview
                   </div>
-                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 min-h-[64px]">
+                  <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100 min-h-[64px]">
                     {answerText || interimTranscript ? (
                       <>
                         {answerText}
@@ -699,7 +699,7 @@ export default function InterviewSession() {
                   </button>
                   <button
                     onClick={clearInputs}
-                    className="py-4 px-6 rounded-2xl font-black text-sm uppercase tracking-widest bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-100 dark:border-slate-700"
+                    className="py-4 px-6 rounded-2xl font-black text-sm uppercase tracking-widest bg-white dark:bg-neutral-950 text-slate-700 dark:text-neutral-200 border border-slate-100 dark:border-neutral-800"
                   >
                     Clear
                   </button>
@@ -717,7 +717,7 @@ export default function InterviewSession() {
               </button>
               <button
                 onClick={handleFinishEarly}
-                className="w-full py-4 rounded-2xl bg-white dark:bg-slate-900 border-2 border-red-100 dark:border-red-900/30 text-red-600 dark:text-red-300 font-black text-sm uppercase tracking-widest"
+                className="w-full py-4 rounded-2xl bg-white dark:bg-neutral-950 border-2 border-red-100 dark:border-red-900/30 text-red-600 dark:text-red-300 font-black text-sm uppercase tracking-widest"
               >
                 Quit
               </button>
@@ -729,12 +729,12 @@ export default function InterviewSession() {
       {showOverlay && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-6">
           <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" />
-          <div className="relative bg-white dark:bg-slate-800 rounded-[2.5rem] border border-slate-100 dark:border-slate-700 shadow-2xl p-10 max-w-sm w-full text-center">
+          <div className="relative bg-white dark:bg-neutral-900 rounded-[2.5rem] border border-slate-100 dark:border-neutral-800 shadow-2xl p-10 max-w-sm w-full text-center">
             <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-6" />
-            <div className="text-2xl font-black text-slate-900 dark:text-slate-100 font-poppins">
+            <div className="text-2xl font-black text-slate-900 dark:text-neutral-100 font-poppins">
               {busy === "initial" ? "Preparing Session..." : "Evaluating Answer..."}
             </div>
-            <div className="text-sm font-semibold text-slate-500 dark:text-slate-400 mt-2">
+            <div className="text-sm font-semibold text-slate-500 dark:text-neutral-400 mt-2">
               {busy === "initial"
                 ? "Connecting to your interview workspace."
                 : "Saving your answer and generating feedback."}

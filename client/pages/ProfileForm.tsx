@@ -37,6 +37,43 @@ const ProfileForm: React.FC = () => {
   const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const suggestedSkills = [
+    'React',
+    'TypeScript',
+    'JavaScript',
+    'Python',
+    'Java',
+    'Node.js',
+    'SQL',
+    'MySQL',
+    'AWS',
+    'Docker',
+    'Data Analysis',
+    'Project Management',
+    'Communication',
+    'Problem Solving',
+    'Leadership',
+    'UI/UX Design',
+    'Machine Learning',
+    'System Design',
+  ];
+
+  const validateSkill = (rawSkill: string) => {
+    const skill = rawSkill.trim().replace(/\s+/g, ' ');
+    if (!skill) return 'Enter a skill first';
+    if ((formData.skills || []).length >= 20) return 'You can add up to 20 skills';
+    if ((formData.skills || []).some(existing => existing.toLowerCase() === skill.toLowerCase())) return 'Skill already added';
+    if (skill.length < 2) return 'Skill is too short';
+    if (skill.length > 40) return 'Skill must be 40 characters or less';
+    if (/^\d+$/.test(skill)) return 'Skill cannot be only numbers';
+    if (/(.)\1{3,}/i.test(skill)) return 'Skill has too many repeated characters';
+    if (!/[a-z]/i.test(skill)) return 'Skill must include letters';
+    if (!/^[a-z0-9][a-z0-9+#./& -]*$/i.test(skill)) return 'Skill contains unsupported characters';
+    if (skill.split(' ').length > 4) return 'Keep each skill short and specific';
+    if (/^(asdf|qwer|test|testing|abc|abcd|none|na|n\/a|random|fake|sample)$/i.test(skill)) return 'Add a real professional skill';
+    return '';
+  };
+
   useEffect(() => {
     if (!profile) return;
     setFormData({
@@ -79,14 +116,21 @@ const ProfileForm: React.FC = () => {
     }
   };
 
-  const addSkill = (e?: React.KeyboardEvent) => {
+  const addSkill = (e?: React.KeyboardEvent, suggestedSkill?: string) => {
     if (e && e.key !== 'Enter') return;
     if (e) e.preventDefault();
     
-    const trimmed = skillInput.trim();
-    if (trimmed && !formData.skills?.includes(trimmed)) {
+    const trimmed = (suggestedSkill || skillInput).trim().replace(/\s+/g, ' ');
+    const validationError = validateSkill(trimmed);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    if (trimmed) {
       setFormData(prev => ({ ...prev, skills: [...(prev.skills || []), trimmed] }));
       setSkillInput('');
+      setError('');
     }
   };
 
@@ -105,12 +149,21 @@ const ProfileForm: React.FC = () => {
     if (!formData.userType) return setError("Please select your user type.");
     if (!formData.voicePreference) return setError("Please select a voice preference.");
     if (!formData.phoneNumber || !/^\d{10}$/.test(formData.phoneNumber)) return setError("Please enter a valid 10-digit phone number");
-    if (!formData.skills || formData.skills.length < 5) return setError("Please add at least 5 tech or non-tech professional skills");
+    const validatedSkills = (formData.skills || []).map(skill => skill.trim()).filter(Boolean);
+    if (validatedSkills.length < 5) return setError("Please add at least 5 tech or non-tech professional skills");
+    if (validatedSkills.length > 20) return setError("You can add up to 20 professional skills");
+    const normalizedSkillNames = new Set<string>();
+    for (const skill of validatedSkills) {
+      const skillKey = skill.toLowerCase();
+      if (normalizedSkillNames.has(skillKey)) return setError(`${skill}: Duplicate skill`);
+      normalizedSkillNames.add(skillKey);
+      const validationError = validateSkillWithList(skill);
+      if (validationError) return setError(`${skill}: ${validationError}`);
+    }
 
     setLoading(true);
     try {
-      await new Promise(r => setTimeout(r, 1000));
-      updateProfileExtras(formData as any);
+      await updateProfileExtras({ ...formData, skills: validatedSkills });
       
       setSuccess(true);
       setTimeout(() => navigate('/dashboard'), 1500);
@@ -121,21 +174,35 @@ const ProfileForm: React.FC = () => {
     }
   };
 
+  const validateSkillWithList = (rawSkill: string) => {
+    const skill = rawSkill.trim().replace(/\s+/g, ' ');
+    if (!skill) return 'Skill cannot be empty';
+    if (skill.length < 2) return 'Skill is too short';
+    if (skill.length > 40) return 'Skill must be 40 characters or less';
+    if (/^\d+$/.test(skill)) return 'Skill cannot be only numbers';
+    if (/(.)\1{3,}/i.test(skill)) return 'Skill has too many repeated characters';
+    if (!/[a-z]/i.test(skill)) return 'Skill must include letters';
+    if (!/^[a-z0-9][a-z0-9+#./& -]*$/i.test(skill)) return 'Skill contains unsupported characters';
+    if (skill.split(' ').length > 4) return 'Keep each skill short and specific';
+    if (/^(asdf|qwer|test|testing|abc|abcd|none|na|n\/a|random|fake|sample)$/i.test(skill)) return 'Add a real professional skill';
+    return '';
+  };
+
   if (!profile) return null;
 
   const availableCities = formData.country ? LOCATION_DATA[formData.country] || [] : [];
 
-  const inputClass = "w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl px-6 py-4 outline-none focus:ring-4 focus:ring-blue-50 dark:focus:ring-blue-900/20 focus:bg-white dark:focus:bg-slate-700 text-slate-900 dark:text-slate-100 font-bold transition-all";
-  const labelClass = "block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 ml-1";
+  const inputClass = "w-full bg-slate-50 dark:bg-neutral-900 border border-slate-100 dark:border-neutral-800 rounded-2xl px-6 py-4 outline-none focus:ring-4 focus:ring-blue-50 dark:focus:ring-blue-900/20 focus:bg-white dark:focus:bg-slate-700 text-slate-900 dark:text-neutral-100 font-bold transition-all";
+  const labelClass = "block text-[10px] font-black text-slate-400 dark:text-neutral-400 uppercase tracking-widest mb-2 ml-1";
 
   return (
     <Layout>
       <div className="max-w-4xl mx-auto px-4 py-16">
-        <div className="bg-white dark:bg-slate-800 rounded-[3rem] border border-slate-100 dark:border-slate-700 shadow-2xl p-8 md:p-12 transition-colors duration-200">
+        <div className="bg-white dark:bg-neutral-900 rounded-[3rem] border border-slate-100 dark:border-neutral-800 shadow-2xl p-8 md:p-12 transition-colors duration-200">
           
-          <div className="flex flex-col md:flex-row items-center gap-10 mb-12 border-b border-slate-50 dark:border-slate-700 pb-10">
+          <div className="flex flex-col md:flex-row items-center gap-10 mb-12 border-b border-slate-50 dark:border-neutral-800 pb-10">
             <div className="relative group">
-              <div className="w-32 h-32 rounded-[2.5rem] overflow-hidden bg-slate-50 dark:bg-slate-900 border-4 border-white dark:border-slate-800 shadow-xl ring-2 ring-blue-50 dark:ring-blue-900/20">
+              <div className="w-32 h-32 rounded-[2.5rem] overflow-hidden bg-slate-50 dark:bg-neutral-950 border-4 border-white dark:border-neutral-800 shadow-xl ring-2 ring-blue-50 dark:ring-blue-900/20">
                 <img 
                   src={formData.profileImage || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile.email}`} 
                   className="w-full h-full object-cover" 
@@ -152,8 +219,8 @@ const ProfileForm: React.FC = () => {
               <input type="file" ref={fileRef} className="hidden" accept="image/*" onChange={handleImageChange} />
             </div>
             <div className="text-center md:text-left">
-              <h1 className="text-4xl font-black text-slate-900 dark:text-slate-100 mb-2 font-poppins">Build Your Profile</h1>
-              <p className="text-slate-500 dark:text-slate-400 font-medium text-lg">Detailed context helps AceMock AI generate better questions.</p>
+              <h1 className="text-4xl font-black text-slate-900 dark:text-neutral-100 mb-2 font-poppins">Build Your Profile</h1>
+              <p className="text-slate-500 dark:text-neutral-400 font-medium text-lg">Detailed context helps AceMock AI generate better questions.</p>
             </div>
           </div>
 
@@ -209,7 +276,7 @@ const ProfileForm: React.FC = () => {
                   <label className={labelClass}>Phone Number *</label>
                   <div className="flex gap-2">
                     <select 
-                      className="w-24 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-700 rounded-2xl px-2 outline-none text-slate-900 dark:text-slate-100 font-bold"
+                      className="w-24 bg-slate-50 dark:bg-neutral-950 border border-slate-100 dark:border-neutral-800 rounded-2xl px-2 outline-none text-slate-900 dark:text-neutral-100 font-bold"
                       value={formData.countryCode}
                       onChange={e => setFormData(prev => ({ ...prev, countryCode: e.target.value }))}
                     >
@@ -219,7 +286,7 @@ const ProfileForm: React.FC = () => {
                       type="tel" 
                       required
                       maxLength={10}
-                      className="flex-grow bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-700 rounded-2xl px-6 py-4 outline-none focus:ring-4 focus:ring-blue-50 dark:focus:ring-blue-900/20 text-slate-900 dark:text-slate-100 font-bold"
+                      className="flex-grow bg-slate-50 dark:bg-neutral-950 border border-slate-100 dark:border-neutral-800 rounded-2xl px-6 py-4 outline-none focus:ring-4 focus:ring-blue-50 dark:focus:ring-blue-900/20 text-slate-900 dark:text-neutral-100 font-bold"
                       placeholder="10 digit number"
                       value={formData.phoneNumber}
                       onChange={e => setFormData(prev => ({ ...prev, phoneNumber: e.target.value.replace(/\D/g, '') }))}
@@ -267,7 +334,7 @@ const ProfileForm: React.FC = () => {
               </div>
             </section>
 
-            <section className="space-y-8 pt-8 border-t border-slate-50 dark:border-slate-700">
+            <section className="space-y-8 pt-8 border-t border-slate-50 dark:border-neutral-800">
               <div className="flex items-center gap-3 text-indigo-600 dark:text-indigo-400">
                  <Icons.Interview />
                  <h2 className="text-xs font-black uppercase tracking-[0.2em]">I am a... *</h2>
@@ -279,7 +346,7 @@ const ProfileForm: React.FC = () => {
                   { id: 'Working Professional', label: 'Professional', icon: '💼' },
                   { id: 'Job Seeker', label: 'Job Seeker', icon: '🔍' }
                 ].map(type => (
-                  <label key={type.id} className={`relative flex items-center gap-4 p-5 rounded-3xl border-2 transition-all cursor-pointer ${formData.userType === type.id ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-md' : 'border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 hover:border-slate-200 dark:hover:border-slate-600'}`}>
+                  <label key={type.id} className={`relative flex items-center gap-4 p-5 rounded-3xl border-2 transition-all cursor-pointer ${formData.userType === type.id ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-md' : 'border-slate-100 dark:border-neutral-800 bg-slate-50 dark:bg-neutral-950 hover:border-slate-200 dark:hover:border-slate-600'}`}>
                     <input 
                       type="radio" 
                       name="userType" 
@@ -289,7 +356,7 @@ const ProfileForm: React.FC = () => {
                     />
                     <div className="flex items-center gap-3">
                       <span className="text-2xl">{type.icon}</span>
-                      <span className="font-bold text-slate-900 dark:text-slate-100">{type.label}</span>
+                      <span className="font-bold text-slate-900 dark:text-neutral-100">{type.label}</span>
                     </div>
                   </label>
                 ))}
@@ -372,7 +439,7 @@ const ProfileForm: React.FC = () => {
                 </div>
               )}
 
-              <div className="pt-8 border-t border-slate-50 dark:border-slate-700">
+              <div className="pt-8 border-t border-slate-50 dark:border-neutral-800">
                 <label className={labelClass}>Professional Skills (Min 5) *</label>
                 <div className="flex flex-wrap gap-2 mb-4">
                   {formData.skills?.map(skill => (
@@ -399,17 +466,46 @@ const ProfileForm: React.FC = () => {
                     Add
                   </button>
                 </div>
+                <div className="mt-5">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-neutral-400 mb-3 ml-1">
+                    Suggested Skills
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {suggestedSkills.map(skill => {
+                      const isSelected = (formData.skills || []).some(existing => existing.toLowerCase() === skill.toLowerCase());
+                      return (
+                        <button
+                          key={skill}
+                          type="button"
+                          disabled={isSelected || (formData.skills || []).length >= 20}
+                          onClick={() => addSkill(undefined, skill)}
+                          className={`px-3 py-2 rounded-xl text-xs font-black border transition-all ${
+                            isSelected
+                              ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border-emerald-100 dark:border-emerald-900/40 cursor-default'
+                              : 'bg-slate-50 dark:bg-neutral-950 text-slate-600 dark:text-neutral-300 border-slate-100 dark:border-neutral-800 hover:border-blue-500 hover:text-blue-600 dark:hover:text-blue-300 disabled:opacity-40 disabled:cursor-not-allowed'
+                          }`}
+                        >
+                          {isSelected ? 'Added ' : '+ '}
+                          {skill}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-3 text-xs font-semibold text-slate-400 dark:text-neutral-400">
+                    Add 5 to 20 real professional skills. Custom skills must be specific and readable.
+                  </p>
+                </div>
               </div>
             </section>
 
-            <section className="space-y-8 pt-8 border-t border-slate-50 dark:border-slate-700">
+            <section className="space-y-8 pt-8 border-t border-slate-50 dark:border-neutral-800">
               <div className="flex items-center gap-3 text-blue-500 dark:text-blue-400">
                  <Icons.Mic />
                  <h2 className="text-xs font-black uppercase tracking-[0.2em]">Voice Preference</h2>
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-lg">
-                <label className={`relative flex items-center gap-4 p-5 rounded-2xl border-2 transition-all cursor-pointer ${formData.voicePreference === 'male' ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-md' : 'border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 hover:border-slate-200 dark:hover:border-slate-600'}`}>
+                <label className={`relative flex items-center gap-4 p-5 rounded-2xl border-2 transition-all cursor-pointer ${formData.voicePreference === 'male' ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-md' : 'border-slate-100 dark:border-neutral-800 bg-slate-50 dark:bg-neutral-950 hover:border-slate-200 dark:hover:border-slate-600'}`}>
                   <input 
                     type="radio" 
                     name="voicePreference" 
@@ -419,11 +515,11 @@ const ProfileForm: React.FC = () => {
                   />
                   <div className="flex items-center gap-3">
                     <span className="text-2xl">👨</span>
-                    <span className="font-bold text-slate-900 dark:text-slate-100">Male Voice</span>
+                    <span className="font-bold text-slate-900 dark:text-neutral-100">Male Voice</span>
                   </div>
                 </label>
 
-                <label className={`relative flex items-center gap-4 p-5 rounded-2xl border-2 transition-all cursor-pointer ${formData.voicePreference === 'female' ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-md' : 'border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 hover:border-slate-200 dark:hover:border-slate-600'}`}>
+                <label className={`relative flex items-center gap-4 p-5 rounded-2xl border-2 transition-all cursor-pointer ${formData.voicePreference === 'female' ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-md' : 'border-slate-100 dark:border-neutral-800 bg-slate-50 dark:bg-neutral-950 hover:border-slate-200 dark:hover:border-slate-600'}`}>
                   <input 
                     type="radio" 
                     name="voicePreference" 
@@ -433,14 +529,14 @@ const ProfileForm: React.FC = () => {
                   />
                   <div className="flex items-center gap-3">
                     <span className="text-2xl">👩</span>
-                    <span className="font-bold text-slate-900 dark:text-slate-100">Female Voice</span>
+                    <span className="font-bold text-slate-900 dark:text-neutral-100">Female Voice</span>
                   </div>
                 </label>
               </div>
             </section>
 
-            <section className="space-y-8 pt-8 border-t border-slate-50 dark:border-slate-700">
-               <div className="flex items-center gap-3 text-slate-600 dark:text-slate-400">
+            <section className="space-y-8 pt-8 border-t border-slate-50 dark:border-neutral-800">
+               <div className="flex items-center gap-3 text-slate-600 dark:text-neutral-400">
                  <Icons.Settings />
                  <h2 className="text-xs font-black uppercase tracking-[0.2em]">Application Theme</h2>
               </div>
@@ -454,8 +550,8 @@ const ProfileForm: React.FC = () => {
                       onClick={() => setFormData(prev => ({ ...prev, theme: theme as any }))}
                       className={`flex-1 py-4 rounded-2xl font-bold transition-all ${
                         formData.theme === theme 
-                        ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 shadow-xl' 
-                        : 'bg-slate-50 dark:bg-slate-900 text-slate-400 dark:text-slate-500 border border-slate-100 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
+                        ? 'bg-slate-900 dark:bg-neutral-100 text-white dark:text-neutral-950 shadow-xl' 
+                        : 'bg-slate-50 dark:bg-neutral-950 text-slate-400 dark:text-neutral-400 border border-slate-100 dark:border-neutral-800 hover:bg-slate-100 dark:hover:bg-neutral-800'
                       }`}
                     >
                       {theme}
@@ -479,14 +575,14 @@ const ProfileForm: React.FC = () => {
                  <button 
                   type="button" 
                   onClick={() => navigate('/dashboard')}
-                  className="flex-1 bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 py-5 rounded-[2rem] font-bold hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+                  className="flex-1 bg-slate-50 dark:bg-neutral-950 text-slate-500 dark:text-neutral-400 py-5 rounded-[2rem] font-bold hover:bg-slate-100 dark:hover:bg-neutral-800 transition"
                 >
                   Skip
                 </button>
                 <button 
                   type="button" 
                   onClick={() => navigate('/dashboard')}
-                  className="flex-1 bg-white dark:bg-slate-800 text-red-500 border border-red-50 dark:border-red-900/30 py-5 rounded-[2rem] font-bold hover:bg-red-50 dark:hover:bg-red-900/10 transition"
+                  className="flex-1 bg-white dark:bg-neutral-900 text-red-500 border border-red-50 dark:border-red-900/30 py-5 rounded-[2rem] font-bold hover:bg-red-50 dark:hover:bg-red-900/10 transition"
                 >
                   Cancel
                 </button>

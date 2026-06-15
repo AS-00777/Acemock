@@ -14,9 +14,11 @@ enum InterviewStatus {
 
 model User {
   id        Int       @id @default(autoincrement())
+  clerkId   String?   @unique @map("clerk_id")
   name      String
   email     String    @unique
-  password  String
+  password  String?
+  authProvider String @default("clerk") @map("auth_provider")
   createdAt DateTime  @default(now()) @map("created_at")
   deletedAt DateTime? @map("deleted_at")
 
@@ -47,6 +49,11 @@ model Question {
   id          Int       @id @default(autoincrement())
   interviewId Int       @map("interview_id")
   questionText String   @map("question_text")
+  questionType String   @default("theory") @map("question_type")
+  expectedAnswer String? @map("expected_answer") @db.Text
+  keyConcepts Json?     @map("key_concepts")
+  difficulty  String?
+  topic       String?
   createdAt   DateTime  @default(now()) @map("created_at")
 
   interview   Interview @relation(fields: [interviewId], references: [id])
@@ -60,8 +67,20 @@ model Answer {
   id         Int      @id @default(autoincrement())
   questionId Int      @map("question_id")
   answerText String   @map("answer_text")
+  code       String?  @db.Text
   score      Int?
+  technicalAccuracy Int? @map("technical_accuracy")
+  conceptCoverage Int? @map("concept_coverage")
+  communicationScore Int? @map("communication_score")
+  semanticSimilarity Int? @map("semantic_similarity")
+  finalScore Int? @map("final_score")
+  matchedConcepts Json? @map("matched_concepts")
+  missingConcepts Json? @map("missing_concepts")
+  rating     String?
+  language   String?
   feedback   String?  @db.Text
+  strengths  String?  @db.Text
+  weaknesses String?  @db.Text
   createdAt  DateTime @default(now()) @map("created_at")
 
   question   Question @relation(fields: [questionId], references: [id])
@@ -81,4 +100,3 @@ model Result {
 
   @@map("results")
 }
-

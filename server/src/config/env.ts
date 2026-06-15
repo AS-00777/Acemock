@@ -11,10 +11,10 @@ function requireEnv(name: string): string {
 export const env = {
   PORT: Number(process.env.PORT ?? 5000),
   DATABASE_URL: requireEnv("DATABASE_URL"),
-  JWT_SECRET: requireEnv("JWT_SECRET"),
-  GEMINI_API_KEY: requireEnv("GEMINI_API_KEY"),
+  CLERK_SECRET_KEY: requireEnv("CLERK_SECRET_KEY"),
+  JWT_SECRET: process.env.JWT_SECRET ?? "unused-clerk-jwt-secret",
+  OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
   FRONTEND_ORIGIN: process.env.FRONTEND_ORIGIN,
-  GEMINI_MODEL: process.env.GEMINI_MODEL,
 };
 
 if (!Number.isFinite(env.PORT) || env.PORT <= 0) {

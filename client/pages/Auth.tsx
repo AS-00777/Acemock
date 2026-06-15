@@ -1,551 +1,282 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import Layout from '../components/Layout';
-import { useAuth } from '../context/AuthContext';
-import { USER_TYPES, EDUCATION_LEVELS, JOB_SEEKER_EXPERIENCE, EXPERIENCE_LEVELS, DOMAINS } from '../constants';
+import type { ReactNode } from "react";
+import { SignIn, SignUp, useAuth } from "@clerk/clerk-react";
+import { Link, Navigate } from "react-router-dom";
+import Layout from "../components/Layout";
 
-const EyeIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-);
+const redirectUrl = "/dashboard";
 
-const EyeOffIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.52 13.52 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
-);
-
-const ErrorAlert: React.FC<{ message: string }> = ({ message }) => (
-  <div className="bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 text-red-600 dark:text-red-400 px-4 py-3 rounded-xl text-sm font-bold flex items-center gap-2 mb-6 animate-pulse">
-    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-    <span>{message}</span>
-  </div>
-);
-
-const validateEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-
-const inputClass = "w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl px-5 py-4 outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-slate-800 text-slate-900 dark:text-slate-100 font-semibold transition-all";
-const labelClass = "block text-xs font-black text-slate-400 dark:text-slate-500 mb-2 ml-1 uppercase tracking-widest";
-
-export const Login: React.FC = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  const navigate = useNavigate();
-  const { login } = useAuth();
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-
-    if (!validateEmail(email)) {
-      setError('Please enter a valid email address.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      await login(email, password);
-      navigate('/dashboard');
-    } catch (err: any) {
-      setError(err.message || 'Login failed');
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
-    <Layout>
-      <div className="min-h-[85vh] flex flex-col items-center justify-center px-4 py-12 bg-slate-50/50 dark:bg-slate-900 transition-colors">
-        <div className="bg-white dark:bg-slate-800 p-10 md:p-12 rounded-[2.5rem] border border-slate-200 dark:border-slate-700 shadow-2xl dark:shadow-none w-full max-w-md transition-colors">
-          <div className="text-center mb-10">
-            <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100 mb-2 font-poppins tracking-tight">Welcome Back</h2>
-            <p className="text-slate-500 dark:text-slate-400 font-medium">Practice your way to the top</p>
-          </div>
-
-          {error && <ErrorAlert message={error} />}
-
-          <form onSubmit={handleLogin} className="space-y-6">
-            <div>
-              <label className={labelClass}>Email Address</label>
-              <input 
-                type="email" 
-                required
-                className={inputClass}
-                placeholder="name@gmail.com"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-              />
-            </div>
-            <div>
-              <div className="flex justify-between items-center mb-2 ml-1">
-                <label className={labelClass}>Password</label>
-                <Link to="/forgot-password" className="text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline">Forgot Password?</Link>
-              </div>
-              <div className="relative">
-                <input 
-                  type={showPassword ? "text" : "password"} 
-                  required
-                  className={inputClass}
-                  placeholder="Password"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                />
-                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
-                  {showPassword ? <EyeOffIcon /> : <EyeIcon />}
-                </button>
-              </div>
-            </div>
-
-            <button 
-              type="submit" 
-              disabled={isSubmitting}
-              className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold text-lg hover:bg-blue-700 transition-all shadow-xl shadow-blue-500/20 dark:shadow-none active:scale-[0.98] disabled:opacity-70 flex items-center justify-center gap-3"
-            >
-              {isSubmitting ? 'Signing In...' : 'Sign In'}
-            </button>
-          </form>
-
-          <div className="mt-8 text-center text-sm font-medium text-slate-500 dark:text-slate-400">
-            Don't have an account? <Link to="/signup" className="text-blue-600 dark:text-blue-400 font-bold hover:underline">Sign up free</Link>
-          </div>
-        </div>
-      </div>
-    </Layout>
-  );
+const clerkAppearance = {
+  variables: {
+    colorPrimary: "#2563eb",
+    colorText: "#0f172a",
+    colorTextSecondary: "#64748b",
+    colorBackground: "transparent",
+    colorInputBackground: "#f8fafc",
+    colorInputText: "#0f172a",
+    borderRadius: "1.25rem",
+    fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
+  },
+  elements: {
+    rootBox: "w-full",
+    card: "w-full bg-transparent shadow-none border-0 p-0",
+    cardBox: "w-full bg-transparent shadow-none border-0",
+    header: "hidden",
+    footer: "hidden",
+    footerAction: "hidden",
+    footerActionText: "text-slate-500",
+    footerActionLink:
+      "text-blue-600 hover:text-blue-700 font-black transition-colors",
+    form: "space-y-5 px-1",
+    formField: "space-y-2",
+    formFieldLabel:
+      "text-[11px] font-black uppercase tracking-widest text-slate-500",
+    formFieldInputContainer: "w-full overflow-visible rounded-2xl",
+    formFieldInputWrapper: "w-full overflow-visible rounded-2xl",
+    formFieldInput:
+      "h-12 w-full min-w-0 box-border rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm font-bold text-slate-950 shadow-sm outline-none transition-all placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/15",
+    formFieldInputShowPasswordButton:
+      "text-slate-400 hover:text-slate-700 transition-colors",
+    formFieldAction:
+      "text-xs font-black text-blue-600 hover:text-blue-700 transition-colors",
+    formButtonPrimary:
+      "h-12 rounded-2xl bg-blue-600 text-sm font-black uppercase tracking-widest text-white shadow-xl shadow-blue-500/20 transition-all hover:bg-blue-700 focus:ring-4 focus:ring-blue-500/25 active:scale-[0.99]",
+    socialButtons: "grid gap-3 px-1",
+    socialButtonsBlockButton:
+      "h-12 rounded-2xl border border-blue-100 bg-blue-50/70 text-slate-800 shadow-sm transition-all hover:border-blue-200 hover:bg-blue-100/70",
+    socialButtonsBlockButtonText:
+      "text-sm font-black text-slate-800 truncate",
+    socialButtonsBlockButtonArrow: "text-slate-400",
+    dividerRow: "px-1",
+    dividerLine: "bg-slate-200",
+    dividerText:
+      "px-3 text-[10px] font-black uppercase tracking-widest text-slate-400",
+    identityPreview:
+      "rounded-2xl border border-slate-200 bg-slate-50 text-slate-900",
+    identityPreviewText: "text-slate-900 font-bold",
+    identityPreviewEditButton:
+      "text-blue-600 hover:text-blue-700 transition-colors",
+    formResendCodeLink:
+      "text-blue-600 hover:text-blue-700 font-black transition-colors",
+    otpCodeFieldInput:
+      "rounded-xl border border-slate-200 bg-slate-50 text-slate-900 focus:border-blue-500 focus:ring-blue-500/15",
+    alert: "rounded-2xl border border-red-100 bg-red-50 text-red-700",
+    alertText: "text-sm font-semibold text-red-700",
+    formFieldErrorText: "text-sm font-semibold text-red-600",
+    formFieldSuccessText: "text-sm font-semibold text-emerald-600",
+    alternativeMethodsBlockButton:
+      "rounded-2xl border border-blue-100 bg-blue-50/70 text-slate-900 hover:bg-blue-100/70",
+    alternativeMethodsBlockButtonText: "font-bold text-slate-900",
+    footerPages: "hidden",
+    footerPage: "hidden",
+    footerPageLink: "hidden",
+    footerPageText: "hidden",
+    footerPageLogo: "hidden",
+    footerPageLogoImage: "hidden",
+    navbar: "hidden",
+    main: "gap-5",
+  },
 };
 
-export const Signup: React.FC = () => {
-  const [formData, setFormData] = useState({ 
-    name: '', 
-    email: '', 
-    userType: '' as any, 
-    password: '', 
-    confirmPassword: '',
-    educationLevel: '',
-    fieldOfStudy: '',
-    industry: '',
-    yearsExperience: 0,
-    targetRole: '',
-    experienceLevel: ''
-  });
-  const [showPassword, setShowPassword] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  const [termsAccepted, setTermsAccepted] = useState(false);
-  const navigate = useNavigate();
-  const { register, updateProfileExtras } = useAuth();
+type AuthShellProps = {
+  children: ReactNode;
+  eyebrow: string;
+  title: string;
+  helper: string;
+  switchText?: string;
+  switchHref?: string;
+  switchLabel?: string;
+};
 
-  const handleSignup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-
-    if (!formData.name) return setError('Full name is required.');
-    if (!validateEmail(formData.email)) return setError('Please enter a valid email.');
-    if (!formData.userType) return setError('Please select your user type.');
-    if (formData.password.length < 6) return setError('Password must be at least 6 characters.');
-    if (formData.password !== formData.confirmPassword) return setError('Passwords do not match.');
-    if (!termsAccepted) return setError('You must accept the terms and conditions.');
-
-    setIsSubmitting(true);
-    try {
-      await register(formData.name, formData.email, formData.password);
-      updateProfileExtras({
-        userType: formData.userType,
-        educationLevel: formData.educationLevel,
-        fieldOfStudy: formData.fieldOfStudy,
-        industry: formData.industry,
-        yearsExperience: formData.yearsExperience,
-        targetRole: formData.targetRole,
-        experienceLevel: formData.experienceLevel,
-        skills: formData.targetRole ? [formData.targetRole] : [],
-      } as any);
-      navigate('/dashboard');
-    } catch (err: any) {
-      setError(err.message || 'Signup failed');
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
+const AuthShell = ({ children, eyebrow, title, helper, switchText, switchHref, switchLabel }: AuthShellProps) => (
+  <AuthRouteGuard>
     <Layout>
-      <div className="min-h-[85vh] flex items-center justify-center px-4 py-20 bg-slate-50/50 dark:bg-slate-900 transition-colors">
-        <div className="bg-white dark:bg-slate-800 p-10 md:p-12 rounded-[3rem] border border-slate-200 dark:border-slate-700 shadow-2xl dark:shadow-none w-full max-w-2xl transition-colors">
-          <div className="text-center mb-10">
-            <h1 className="text-4xl font-bold text-slate-900 dark:text-slate-100 mb-2 font-poppins tracking-tight">Create Account</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-lg font-medium">Join 50,000+ professionals practicing daily</p>
-          </div>
-          
-          {error && <ErrorAlert message={error} />}
-          
-          <form onSubmit={handleSignup} className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className={labelClass}>Full Name</label>
-                <input 
-                  type="text" 
-                  required
-                  className={inputClass}
-                  value={formData.name}
-                  onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                  placeholder="Your Name"
-                />
+      <section className="relative min-h-[calc(100vh-5rem)] overflow-hidden bg-slate-50/30 px-4 py-8 text-slate-900 dark:bg-neutral-950 sm:px-6 lg:px-8">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.12),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(15,23,42,0.08),transparent_32%)] dark:bg-none" />
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-blue-200 to-transparent dark:via-neutral-800" />
+
+        <div className="relative mx-auto grid min-h-[calc(100vh-9rem)] w-full max-w-6xl items-center gap-8 lg:grid-cols-[0.95fr_1.05fr]">
+          <aside className="hidden lg:block">
+            <div className="max-w-lg">
+              <div className="mb-8 inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-slate-700 shadow-xl shadow-slate-200/60 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-200 dark:shadow-none">
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-[10px] text-white shadow-lg shadow-blue-600/30">
+                  AM
+                </span>
+                AceMock AI
               </div>
-              <div>
-                <label className={labelClass}>Email Address</label>
-                <input 
-                  type="email" 
-                  required
-                  className={inputClass}
-                  value={formData.email}
-                  onChange={e => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                  placeholder="email@example.com"
-                />
-              </div>
-            </div>
-            
-            <div className="space-y-3">
-              <label className={labelClass}>I am a... *</label>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <h1 className="font-poppins text-5xl font-black leading-tight tracking-tight text-slate-950 dark:text-neutral-100 xl:text-6xl">
+                Practice Smarter. Interview Better.
+              </h1>
+              <p className="mt-6 max-w-md text-lg font-semibold leading-8 text-slate-600 dark:text-neutral-400">
+                AI-powered mock interviews with real-time feedback, scoring, and improvement insights.
+              </p>
+              <div className="mt-10 grid max-w-md grid-cols-3 gap-4">
                 {[
-                  { id: 'Student', label: 'Student', icon: '🎓' },
-                  { id: 'Working Professional', label: 'Professional', icon: '💼' },
-                  { id: 'Job Seeker', label: 'Job Seeker', icon: '🔍' }
-                ].map(type => (
-                  <label key={type.id} className={`relative flex items-center gap-3 p-4 rounded-2xl border-2 transition-all cursor-pointer ${formData.userType === type.id ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-md' : 'border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 hover:border-slate-200 dark:hover:border-slate-600'}`}>
-                    <input 
-                      type="radio" 
-                      name="userType" 
-                      className="w-4 h-4 text-blue-600 dark:text-blue-500 focus:ring-blue-500" 
-                      checked={formData.userType === type.id}
-                      onChange={() => setFormData(prev => ({ ...prev, userType: type.id as any }))}
-                    />
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl">{type.icon}</span>
-                      <span className="text-sm font-bold text-slate-900 dark:text-slate-100">{type.label}</span>
-                    </div>
-                  </label>
+                  ["Real-time", "AI Feedback"],
+                  ["Smart", "Scoring"],
+                  ["Growth", "Insights"],
+                ].map(([lineOne, lineTwo]) => (
+                  <div
+                    key={`${lineOne}-${lineTwo}`}
+                    className="min-h-24 rounded-2xl border border-slate-200 bg-white px-4 py-5 text-center shadow-xl shadow-slate-200/60 transition-all dark:border-neutral-800 dark:bg-neutral-900 dark:shadow-none"
+                  >
+                    <span className="block text-[10px] font-black uppercase tracking-[0.18em] text-blue-600 dark:text-blue-400">
+                      {lineOne}
+                    </span>
+                    <span className="mt-1 block text-sm font-black leading-snug text-slate-800 dark:text-neutral-100">
+                      {lineTwo}
+                    </span>
+                  </div>
                 ))}
               </div>
             </div>
+          </aside>
 
-            {formData.userType === 'Student' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in slide-in-from-top-2 duration-300">
-                <div>
-                  <label className={labelClass}>Education Level</label>
-                  <select 
-                    className={inputClass}
-                    value={formData.educationLevel}
-                    onChange={e => setFormData(prev => ({ ...prev, educationLevel: e.target.value }))}
-                  >
-                    <option value="">Select Level</option>
-                    {EDUCATION_LEVELS.map(lvl => <option key={lvl} value={lvl} className="bg-white dark:bg-slate-800">{lvl}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelClass}>Field of Study</label>
-                  <input 
-                    type="text" 
-                    className={inputClass}
-                    placeholder="e.g. Computer Science"
-                    value={formData.fieldOfStudy}
-                    onChange={e => setFormData(prev => ({ ...prev, fieldOfStudy: e.target.value }))}
-                  />
-                </div>
+          <div className="mx-auto flex w-full max-w-md flex-col justify-center sm:max-w-lg lg:ml-auto">
+            <div className="mb-6 text-center lg:hidden">
+              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600 text-xs font-black text-white shadow-lg shadow-blue-600/30">
+                AM
               </div>
-            )}
-
-            {formData.userType === 'Working Professional' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in slide-in-from-top-2 duration-300">
-                <div>
-                  <label className={labelClass}>Years of Experience</label>
-                  <select 
-                    className={inputClass}
-                    value={formData.yearsExperience}
-                    onChange={e => setFormData(prev => ({ ...prev, yearsExperience: parseInt(e.target.value) }))}
-                  >
-                    <option value="0" className="bg-white dark:bg-slate-800">Less than 1 Year</option>
-                    <option value="1" className="bg-white dark:bg-slate-800">1 Year</option>
-                    <option value="2" className="bg-white dark:bg-slate-800">2 Years</option>
-                    <option value="3" className="bg-white dark:bg-slate-800">3 Years</option>
-                    <option value="5" className="bg-white dark:bg-slate-800">5 Years</option>
-                    <option value="10" className="bg-white dark:bg-slate-800">10+ Years</option>
-                  </select>
-                </div>
-                <div>
-                  <label className={labelClass}>Industry</label>
-                  <input 
-                    type="text" 
-                    className={inputClass}
-                    placeholder="e.g. Fintech, E-commerce"
-                    value={formData.industry}
-                    onChange={e => setFormData(prev => ({ ...prev, industry: e.target.value }))}
-                  />
-                </div>
-              </div>
-            )}
-
-            {formData.userType === 'Job Seeker' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in slide-in-from-top-2 duration-300">
-                <div>
-                  <label className={labelClass}>Experience Level</label>
-                  <select 
-                    className={inputClass}
-                    value={formData.experienceLevel}
-                    onChange={e => setFormData(prev => ({ ...prev, experienceLevel: e.target.value }))}
-                  >
-                    <option value="" className="bg-white dark:bg-slate-800">Select Level</option>
-                    {JOB_SEEKER_EXPERIENCE.map(lvl => <option key={lvl} value={lvl} className="bg-white dark:bg-slate-800">{lvl}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelClass}>Target Role</label>
-                  <input 
-                    type="text" 
-                    className={inputClass}
-                    placeholder="e.g. Product Manager"
-                    value={formData.targetRole}
-                    onChange={e => setFormData(prev => ({ ...prev, targetRole: e.target.value }))}
-                  />
-                </div>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className={labelClass}>Password</label>
-                <div className="relative">
-                  <input 
-                    type={showPassword ? "text" : "password"} 
-                    required
-                    className={inputClass}
-                    placeholder="Password"
-                    value={formData.password}
-                    onChange={e => setFormData(prev => ({ ...prev, password: e.target.value }))}
-                  />
-                  <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-400">
-                    {showPassword ? <EyeOffIcon /> : <EyeIcon />}
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label className={labelClass}>Confirm Password</label>
-                <input 
-                  type={showPassword ? "text" : "password"} 
-                  required
-                  className={inputClass}
-                  placeholder="Confirm Password"
-                  value={formData.confirmPassword}
-                  onChange={e => setFormData(prev => ({ ...prev, confirmPassword: e.target.value }))}
-                />
-              </div>
+              <p className="text-xs font-black uppercase tracking-[0.28em] text-blue-600 dark:text-blue-400">
+                AceMock AI
+              </p>
+              <h1 className="mt-3 font-poppins text-3xl font-black leading-tight text-slate-950 dark:text-neutral-100 sm:text-4xl">
+                Practice Smarter. Interview Better.
+              </h1>
+              <p className="mx-auto mt-3 max-w-sm text-sm font-semibold leading-6 text-slate-600 dark:text-neutral-400">
+                AI-powered mock interviews with real-time feedback, scoring, and improvement insights.
+              </p>
             </div>
 
-            <div className="flex items-start gap-3 ml-1">
-              <input 
-                type="checkbox" 
-                id="terms" 
-                required
-                className="w-5 h-5 mt-0.5 rounded border-slate-300 dark:border-slate-700 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                checked={termsAccepted}
-                onChange={e => setTermsAccepted(e.target.checked)}
-              />
-              <label htmlFor="terms" className="text-sm font-medium text-slate-500 dark:text-slate-400 cursor-pointer">
-                I agree to the <span className="text-blue-600 dark:text-blue-400 font-bold">Terms</span> and <span className="text-blue-600 dark:text-blue-400 font-bold">Privacy Policy</span>. <span className="text-red-500">*</span>
-              </label>
+            <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-2xl shadow-slate-200/70 sm:rounded-[2.5rem] sm:p-8 dark:border-neutral-800 dark:bg-neutral-900 dark:shadow-none">
+              <div className="mb-7">
+                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-blue-600 dark:text-blue-400">
+                  {eyebrow}
+                </p>
+                <h2 className="mt-3 font-poppins text-2xl font-black tracking-tight text-slate-950 dark:text-neutral-100 sm:text-3xl">
+                  {title}
+                </h2>
+                <p className="mt-2 text-sm font-semibold leading-6 text-slate-500 dark:text-neutral-400">
+                  {helper}
+                </p>
+              </div>
+              {children}
+              {switchHref && switchText && switchLabel && (
+                <div className="mt-6 text-center text-sm font-semibold text-slate-500 dark:text-neutral-400">
+                  {switchText}{" "}
+                  <Link to={switchHref} className="font-black text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300">
+                    {switchLabel}
+                  </Link>
+                </div>
+              )}
+              <div className="mt-5 border-t border-slate-100 pt-4 text-center text-[11px] font-bold text-slate-400 dark:border-neutral-800 dark:text-neutral-500">
+                Secured by <span className="font-black text-slate-500 dark:text-neutral-400">Clerk</span>
+              </div>
             </div>
-
-            <button 
-              type="submit" 
-              disabled={isSubmitting}
-              className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold text-xl hover:bg-blue-700 shadow-xl shadow-blue-500/20 dark:shadow-none transition-all active:scale-[0.98] mt-4 flex items-center justify-center gap-3"
-            >
-              {isSubmitting ? 'Creating Profile...' : 'Sign Up Now'}
-            </button>
-          </form>
-          <div className="mt-8 text-center text-sm font-medium text-slate-500 dark:text-slate-400">
-            Already have an account? <Link to="/login" className="text-blue-600 dark:text-blue-400 font-bold hover:underline">Log in</Link>
           </div>
         </div>
-      </div>
+      </section>
     </Layout>
-  );
-};
+  </AuthRouteGuard>
+);
 
-export const ForgotPassword: React.FC = () => {
-  const [email, setEmail] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-  const [cooldown, setCooldown] = useState(0);
+const AuthRouteGuard = ({ children }: { children: ReactNode }) => {
+  const { isLoaded, isSignedIn } = useAuth();
 
-  useEffect(() => {
-    if (cooldown > 0) {
-      const timer = setTimeout(() => setCooldown(cooldown - 1), 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [cooldown]);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!validateEmail(email)) {
-      setError('Invalid email format.');
-      return;
-    }
-    
-    setError('');
-    setMessage('');
-    setIsSubmitting(true);
-
-    setTimeout(() => {
-      setIsSubmitting(false);
-      setMessage('If this email is registered, a reset link has been sent.');
-      setCooldown(30);
-    }, 1200);
-  };
-
-  return (
-    <Layout>
-      <div className="min-h-[70vh] flex flex-col items-center justify-center px-4 bg-slate-50/50 dark:bg-slate-900 transition-colors">
-        <div className="bg-white dark:bg-slate-800 p-10 rounded-[2.5rem] border border-slate-200 dark:border-slate-700 shadow-2xl dark:shadow-none w-full max-w-md transition-colors">
-          <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100 mb-2">Reset Password</h2>
-            <p className="text-slate-500 dark:text-slate-400">Enter your email to receive a recovery link</p>
-          </div>
-
-          {error && <ErrorAlert message={error} />}
-          {message && (
-            <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-4 py-3 rounded-xl text-sm font-bold flex items-center gap-2 mb-6">
-              <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
-              <span>{message}</span>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div>
-              <label className={labelClass}>Email Address</label>
-              <input 
-                type="email" 
-                required
-                className={inputClass}
-                placeholder="name@gmail.com"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-              />
-            </div>
-
-            <button 
-              type="submit" 
-              disabled={isSubmitting || cooldown > 0}
-              className="w-full bg-slate-900 dark:bg-slate-700 text-white py-4 rounded-2xl font-bold text-lg hover:bg-black dark:hover:bg-slate-600 transition-all shadow-xl dark:shadow-none disabled:opacity-50 flex items-center justify-center gap-3"
-            >
-              {isSubmitting ? 'Sending...' : cooldown > 0 ? `Resend in ${cooldown}s` : 'Send Reset Link'}
-            </button>
-          </form>
-
-          <div className="mt-8 text-center text-sm font-medium text-slate-500 dark:text-slate-400">
-            Remembered your password? <Link to="/login" className="text-blue-600 dark:text-blue-400 font-bold hover:underline">Back to Login</Link>
-          </div>
-        </div>
-      </div>
-    </Layout>
-  );
-};
-
-export const ResetPassword: React.FC = () => {
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState(false);
-  const navigate = useNavigate();
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters.');
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError('Passwords do not match.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    setTimeout(() => {
-      setIsSubmitting(false);
-      setSuccess(true);
-      setTimeout(() => navigate('/login'), 2000);
-    }, 1500);
-  };
-
-  if (success) {
+  if (!isLoaded) {
     return (
       <Layout>
-        <div className="min-h-[60vh] flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-800 p-12 rounded-[3rem] text-center shadow-2xl dark:shadow-none border border-slate-100 dark:border-slate-700 max-w-sm transition-colors">
-            <div className="w-20 h-20 bg-emerald-100 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto mb-6 text-3xl">✓</div>
-            <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-4">Password Reset!</h2>
-            <p className="text-slate-500 dark:text-slate-400 mb-8 font-medium">Your password has been successfully updated. Redirecting to login...</p>
-            <div className="w-8 h-8 border-4 border-emerald-500 dark:border-emerald-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
+        <section className="flex min-h-[calc(100vh-5rem)] items-center justify-center bg-slate-50 px-6 text-slate-900 dark:bg-neutral-950 dark:text-neutral-100">
+          <div className="rounded-2xl border border-slate-200 bg-white px-6 py-4 text-sm font-black uppercase tracking-widest text-slate-500 shadow-2xl shadow-slate-200/60 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300 dark:shadow-none">
+            Loading secure sign in...
           </div>
-        </div>
+        </section>
       </Layout>
     );
   }
 
-  return (
-    <Layout>
-      <div className="min-h-[70vh] flex flex-col items-center justify-center px-4 dark:bg-slate-900 transition-colors">
-        <div className="bg-white dark:bg-slate-800 p-10 rounded-[2.5rem] border border-slate-200 dark:border-slate-700 shadow-2xl dark:shadow-none w-full max-w-md transition-colors">
-          <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100 mb-2">Create New Password</h2>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">Make sure it's strong and unique</p>
-          </div>
+  if (isSignedIn) {
+    return <Navigate to={redirectUrl} replace />;
+  }
 
-          {error && <ErrorAlert message={error} />}
-
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div>
-              <label className={labelClass}>New Password</label>
-              <div className="relative">
-                <input 
-                  type={showPassword ? "text" : "password"} 
-                  required
-                  className={inputClass}
-                  placeholder="Password"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                />
-                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-400">
-                  {showPassword ? <EyeOffIcon /> : <EyeIcon />}
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <label className={labelClass}>Confirm New Password</label>
-              <input 
-                type={showPassword ? "text" : "password"} 
-                required
-                className={inputClass}
-                placeholder="Confirm Password"
-                value={confirmPassword}
-                onChange={e => setConfirmPassword(e.target.value)}
-              />
-            </div>
-
-            <button 
-              type="submit" 
-              disabled={isSubmitting}
-              className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold text-lg hover:bg-blue-700 shadow-xl shadow-blue-500/20 dark:shadow-none transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-3"
-            >
-              {isSubmitting ? 'Updating...' : 'Reset Password'}
-            </button>
-          </form>
-        </div>
-      </div>
-    </Layout>
-  );
+  return <>{children}</>;
 };
+
+export const Login = () => (
+  <AuthShell
+    eyebrow="Welcome back"
+    title="Sign in to continue"
+    helper="Use email, Google, or LinkedIn to open your interview workspace."
+    switchText="Don't have an account?"
+    switchHref="/signup"
+    switchLabel="Sign up"
+  >
+    <SignIn
+      routing="path"
+      path="/login"
+      signUpUrl="/signup"
+      fallbackRedirectUrl={redirectUrl}
+      forceRedirectUrl={redirectUrl}
+      appearance={clerkAppearance}
+    />
+  </AuthShell>
+);
+
+export const Signup = () => (
+  <AuthShell
+    eyebrow="Start practicing"
+    title="Create your account"
+    helper="Join AceMock AI and begin building interview confidence."
+    switchText="Already have an account?"
+    switchHref="/login"
+    switchLabel="Sign in"
+  >
+    <SignUp
+      routing="path"
+      path="/signup"
+      signInUrl="/login"
+      fallbackRedirectUrl={redirectUrl}
+      forceRedirectUrl={redirectUrl}
+      appearance={clerkAppearance}
+    />
+  </AuthShell>
+);
+
+export const ForgotPassword = () => (
+  <AuthShell
+    eyebrow="Account recovery"
+    title="Reset your password"
+    helper="Enter your account email and Clerk will guide the recovery flow."
+    switchText="Remembered your password?"
+    switchHref="/login"
+    switchLabel="Sign in"
+  >
+    <SignIn
+      routing="path"
+      path="/forgot-password"
+      signUpUrl="/signup"
+      fallbackRedirectUrl={redirectUrl}
+      forceRedirectUrl={redirectUrl}
+      appearance={clerkAppearance}
+    />
+  </AuthShell>
+);
+
+export const ResetPassword = () => (
+  <AuthShell
+    eyebrow="Set new password"
+    title="Complete password reset"
+    helper="Finish the secure Clerk reset flow and return to your dashboard."
+    switchText="Back to account access?"
+    switchHref="/login"
+    switchLabel="Sign in"
+  >
+    <SignIn
+      routing="path"
+      path="/reset-password"
+      signUpUrl="/signup"
+      fallbackRedirectUrl={redirectUrl}
+      forceRedirectUrl={redirectUrl}
+      appearance={clerkAppearance}
+    />
+  </AuthShell>
+);

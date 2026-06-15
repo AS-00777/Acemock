@@ -1,8 +1,35 @@
 const path = require("path");
+const fs = require("fs");
+const webpack = require("webpack");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
+const dotenv = require("dotenv");
+
+dotenv.config();
+
+function loadEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return {};
+  return fs
+    .readFileSync(filePath, "utf8")
+    .split(/\r?\n/)
+    .reduce((acc, line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) return acc;
+      const eq = trimmed.indexOf("=");
+      if (eq === -1) return acc;
+      const key = trimmed.slice(0, eq).trim();
+      const value = trimmed.slice(eq + 1).trim().replace(/^['"]|['"]$/g, "");
+      acc[key] = value;
+      return acc;
+    }, {});
+}
 
 module.exports = (_env, argv) => {
   const isProd = argv.mode === "production";
+  const localEnv = loadEnvFile(path.resolve(__dirname, ".env.local"));
+  const env = {
+    ...localEnv,
+    ...process.env,
+  };
 
   return {
     target: "web",
@@ -49,8 +76,20 @@ module.exports = (_env, argv) => {
       ],
     },
     plugins: [
+      new webpack.DefinePlugin({
+        "import.meta.env": JSON.stringify({
+          DEV: !isProd,
+          VITE_API_BASE_URL: env.VITE_API_BASE_URL,
+          VITE_CLERK_PUBLISHABLE_KEY: env.VITE_CLERK_PUBLISHABLE_KEY,
+        }),
+      }),
       new HtmlWebpackPlugin({
         template: path.resolve(__dirname, "index.html"),
+      }),
+      new webpack.DefinePlugin({
+        "process.env.REACT_APP_CLERK_PUBLISHABLE_KEY": JSON.stringify(
+          process.env.REACT_APP_CLERK_PUBLISHABLE_KEY
+        ),
       }),
     ],
     devServer: {
@@ -66,4 +105,3 @@ module.exports = (_env, argv) => {
     stats: "errors-warnings",
   };
 };
-

@@ -28,6 +28,10 @@ type QuestionRow = RowDataPacket & {
   interview_id: number;
   question_text: string;
   question_type: QuestionType;
+  expected_answer: string | null;
+  key_concepts: any;
+  difficulty: Difficulty | null;
+  topic: string | null;
   created_at: Date;
 };
 
@@ -37,9 +41,18 @@ type AnswerRow = RowDataPacket & {
   answer_text: string;
   code: string | null;
   score: number | null;
+  technical_accuracy: number | null;
+  concept_coverage: number | null;
+  communication_score: number | null;
+  semantic_similarity: number | null;
+  final_score: number | null;
+  matched_concepts: any;
+  missing_concepts: any;
   rating: Rating | null;
   language: string | null;
   feedback: string | null;
+  strengths: string | null;
+  weaknesses: string | null;
   created_at: Date;
 };
 
@@ -60,6 +73,12 @@ function parseJsonMaybe(v: unknown) {
     }
   }
   return v;
+}
+
+function parseStringArrayMaybe(value: unknown): string[] {
+  const parsed = parseJsonMaybe(value);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.map((item) => String(item ?? "").trim()).filter(Boolean);
 }
 
 function isDifficulty(v: unknown): v is Difficulty {
@@ -180,32 +199,50 @@ export async function addOrGenerateQuestion(params: {
   const previousQuestions = previousRows.map((q) => q.question_text);
   const prevNorm = new Set(previousQuestions.map(normalizeQuestion));
 
-  const questionText = await (async () => {
+  const generatedQuestion = await (async () => {
     const provided = params.questionText?.trim();
-    if (provided) return provided;
-
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const generated = await generateInterviewQuestion({
+    if (provided) {
+      return {
+        question: provided,
+        expectedAnswer: `A strong answer should address the question directly, use technically correct details, and mention practical tradeoffs for ${interview.role}.`,
+        keyConcepts: ["Technical correctness", "Direct answer", "Practical tradeoffs", "Relevant example"],
         difficulty,
-        role: interview.role,
-        experience: interview.experience,
-        techStack: interview.tech_stack,
-        questionType: desiredType,
-        previousQuestions,
-      });
-
-      const norm = normalizeQuestion(generated.question);
-      if (norm && !prevNorm.has(norm)) return generated.question;
+        topic: interview.role,
+      };
     }
 
-    return desiredType === "coding"
+    const generated = await generateInterviewQuestion({
+      difficulty,
+      role: interview.role,
+      experience: interview.experience,
+      techStack: interview.tech_stack,
+      questionType: desiredType,
+      previousQuestions,
+    });
+
+    const norm = normalizeQuestion(generated.question);
+    if (norm && !prevNorm.has(norm)) return generated;
+
+    const fallbackQuestion = desiredType === "coding"
       ? `Write a small function related to ${interview.role} work and explain your approach and tradeoffs.`
       : `Describe a challenging ${interview.role} project you delivered and how you handled tradeoffs.`;
+    return {
+      ...generated,
+      question: fallbackQuestion,
+    };
   })();
 
   const insert = await exec(
-    "INSERT INTO questions (interview_id, question_text, question_type, created_at) VALUES (?, ?, ?, NOW())",
-    [interview.id, questionText, desiredType]
+    "INSERT INTO questions (interview_id, question_text, question_type, expected_answer, key_concepts, difficulty, topic, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
+    [
+      interview.id,
+      generatedQuestion.question,
+      desiredType,
+      generatedQuestion.expectedAnswer || null,
+      JSON.stringify(generatedQuestion.keyConcepts ?? []),
+      generatedQuestion.difficulty ?? difficulty,
+      generatedQuestion.topic || null,
+    ]
   );
 
   const rows = await query<QuestionRow[]>(
@@ -221,6 +258,9 @@ export async function saveAnswerWithEvaluation(params: {
   answerText: string;
   code?: string;
   language?: string;
+  difficulty?: Difficulty;
+  correctAnswer?: string;
+  testCases?: any;
   questionId?: number;
   questionText?: string;
 }) {
@@ -230,13 +270,15 @@ export async function saveAnswerWithEvaluation(params: {
   let questionId = params.questionId;
   let questionText = params.questionText?.trim();
   let questionType: QuestionType = "theory";
+  let expectedAnswer = params.correctAnswer?.trim() ?? "";
+  let keyConcepts: string[] = [];
 
   if (!questionId) {
     if (!questionText) throw new ApiError(400, "questionId or questionText is required");
     questionType = inferQuestionTypeFromText(questionText);
     const ins = await exec(
-      "INSERT INTO questions (interview_id, question_text, question_type, created_at) VALUES (?, ?, ?, NOW())",
-      [interview.id, questionText, questionType]
+      "INSERT INTO questions (interview_id, question_text, question_type, expected_answer, key_concepts, difficulty, topic, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
+      [interview.id, questionText, questionType, expectedAnswer || null, JSON.stringify([]), getInterviewDifficulty(interview), interview.role,]
     );
     questionId = ins.insertId;
   } else {
@@ -248,29 +290,44 @@ export async function saveAnswerWithEvaluation(params: {
     if (!q) throw new ApiError(404, "Question not found");
     questionText = q.question_text;
     questionType = q.question_type;
+    expectedAnswer = expectedAnswer || q.expected_answer || "";
+    keyConcepts = parseStringArrayMaybe(q.key_concepts);
   }
 
+  const difficulty = params.difficulty && isDifficulty(params.difficulty) ? params.difficulty : getInterviewDifficulty(interview);
   const evaluation = await evaluateInterviewAnswer({
-    role: interview.role,
-    experience: interview.experience,
-    techStack: interview.tech_stack,
     question: questionText!,
-    questionType,
-    answer: params.answerText ?? "",
-    code: params.code,
-    language: params.language,
+    expectedAnswer,
+    keyConcepts,
+    userAnswer: questionType === "coding" ? (params.code ?? params.answerText ?? "") : (params.answerText ?? ""),
+    difficulty,
+    type: questionType,
+    testCases: Array.isArray(params.testCases) ? params.testCases : undefined,
   });
 
   const insAnswer = await exec(
-    "INSERT INTO answers (question_id, answer_text, code, score, rating, language, feedback, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
+    `INSERT INTO answers (
+      question_id, answer_text, code, score, technical_accuracy, concept_coverage,
+      communication_score, semantic_similarity, final_score, matched_concepts,
+      missing_concepts, rating, language, feedback, strengths, weaknesses, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
     [
       questionId,
       params.answerText ?? "",
       params.code ?? null,
       evaluation.score,
+      evaluation.technicalAccuracy ?? null,
+      evaluation.conceptCoverage ?? null,
+      evaluation.communicationScore ?? null,
+      evaluation.semanticSimilarity ?? null,
+      evaluation.score100 ?? null,
+      JSON.stringify(evaluation.matchedConcepts ?? []),
+      JSON.stringify(evaluation.missingConcepts ?? []),
       evaluation.rating ?? null,
       params.language ?? null,
       evaluation.feedback,
+      evaluation.strengths ?? null,
+      evaluation.weaknesses ?? evaluation.suggestions ?? null,
     ]
   );
   const arows = await query<AnswerRow[]>(
@@ -293,23 +350,25 @@ export async function completeInterview(params: {
     (RowDataPacket & {
       question_text: string;
       answer_text: string;
+      final_score: number | null;
       score: number | null;
       feedback: string | null;
     })[]
   >(
-    "SELECT q.question_text, a.answer_text, a.score, a.feedback FROM questions q JOIN answers a ON a.question_id = q.id WHERE q.interview_id = ? ORDER BY q.id ASC, a.id ASC",
+    "SELECT q.question_text, a.answer_text, a.score, a.final_score, a.feedback FROM questions q JOIN answers a ON a.question_id = q.id WHERE q.interview_id = ? ORDER BY q.id ASC, a.id ASC",
     [interview.id]
   );
 
-  const scores = qaRows.map((r) => r.score).filter((s): s is number => typeof s === "number");
-  const avg10 = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
-  const computedOverall = Math.max(0, Math.min(100, Math.round(avg10 * 10)));
+  const scores100 = qaRows
+    .map((r) => (typeof r.final_score === "number" ? r.final_score : typeof r.score === "number" ? r.score * 10 : null))
+    .filter((s): s is number => typeof s === "number");
+  const computedOverall = scores100.length ? Math.max(0, Math.min(100, Math.round(scores100.reduce((a, b) => a + b, 0) / scores100.length))) : 0;
   const overallScore = typeof params.overallScore === "number" ? params.overallScore : computedOverall;
 
   const qas = qaRows.map((r) => ({
     question: r.question_text,
     answer: r.answer_text,
-    score: r.score ?? undefined,
+    score: typeof r.final_score === "number" ? Math.round(r.final_score / 10) : r.score ?? undefined,
     feedback: r.feedback ?? undefined,
   }));
 
@@ -396,6 +455,15 @@ export async function getInterviewHistory(params: { userId: number; page: number
   return { total: totalRows[0]?.c ?? 0, page, limit, items: mapped };
 }
 
+export async function deleteInterview(params: { interviewId: number; userId: number }) {
+  await getInterviewOrThrow(params.interviewId, params.userId);
+  await exec("DELETE FROM interviews WHERE id = ? AND user_id = ?", [
+    params.interviewId,
+    params.userId,
+  ]);
+  return { deleted: true };
+}
+
 export async function getInterviewDetails(params: { interviewId: number; userId: number }) {
   const interview = await getInterviewOrThrow(params.interviewId, params.userId);
 
@@ -433,6 +501,10 @@ export async function getInterviewDetails(params: { interviewId: number; userId:
         id: q.id,
         interviewId: q.interview_id,
         questionText: q.question_text,
+      expectedAnswer: q.expected_answer,
+      keyConcepts: parseStringArrayMaybe(q.key_concepts),
+      difficulty: q.difficulty,
+      topic: q.topic,
       type: q.question_type === "coding" ? "coding" : "theory",
       createdAt: q.created_at,
       answers: (answersByQuestionId.get(q.id) ?? []).map((a) => ({
@@ -442,8 +514,17 @@ export async function getInterviewDetails(params: { interviewId: number; userId:
         code: a.code,
         language: a.language,
         score: a.score,
+        technicalAccuracy: a.technical_accuracy,
+        conceptCoverage: a.concept_coverage,
+        communicationScore: a.communication_score,
+        semanticSimilarity: a.semantic_similarity,
+        finalScore: a.final_score,
+        matchedConcepts: parseStringArrayMaybe(a.matched_concepts),
+        missingConcepts: parseStringArrayMaybe(a.missing_concepts),
         rating: a.rating,
         feedback: a.feedback,
+        strengths: a.strengths,
+        weaknesses: a.weaknesses,
         createdAt: a.created_at,
       })),
     })),

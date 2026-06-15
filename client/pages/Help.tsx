@@ -15,23 +15,23 @@ const FAQItem: React.FC<FAQItemProps> = ({ question, answer, score }) => {
   const getScoreColor = (s: number) => {
     if (s >= 80) return 'bg-emerald-500';
     if (s >= 40) return 'bg-amber-500';
-    return 'bg-slate-300 dark:bg-slate-600';
+    return 'bg-slate-300 dark:bg-neutral-700';
   };
 
   return (
-    <div className="border-b border-slate-100 dark:border-slate-700 last:border-0 overflow-hidden">
+    <div className="border-b border-slate-100 dark:border-neutral-800 last:border-0 overflow-hidden">
       {/* Relevance Bar - Only shown if searching */}
       {score > 0 && (
         <div className="pt-4 px-1">
           <div className="flex justify-between items-center mb-1.5">
-            <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-widest">
+            <span className="text-[9px] font-black uppercase text-slate-400 dark:text-neutral-400 tracking-widest">
               Match Relevance
             </span>
             <span className={`text-[9px] font-black px-1.5 py-0.5 rounded text-white ${getScoreColor(score)}`}>
               {score}%
             </span>
           </div>
-          <div className="w-full h-1 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+          <div className="w-full h-1 bg-slate-100 dark:bg-neutral-800 rounded-full overflow-hidden">
             <div 
               className={`h-full transition-all duration-500 ease-out ${getScoreColor(score)}`}
               style={{ width: `${score}%` }}
@@ -44,7 +44,7 @@ const FAQItem: React.FC<FAQItemProps> = ({ question, answer, score }) => {
         onClick={() => setIsOpen(!isOpen)}
         className="w-full py-6 flex items-center justify-between text-left focus:outline-none group transition-colors"
       >
-        <span className="text-lg font-bold text-slate-900 dark:text-slate-100 group-hover:text-blue-600 dark:group-hover:text-blue-400">
+        <span className="text-lg font-bold text-slate-900 dark:text-neutral-100 group-hover:text-blue-600 dark:group-hover:text-blue-400">
           {question}
         </span>
         <svg
@@ -61,7 +61,7 @@ const FAQItem: React.FC<FAQItemProps> = ({ question, answer, score }) => {
           isOpen ? 'max-h-40 opacity-100 pb-6' : 'max-h-0 opacity-0'
         }`}
       >
-        <p className="text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
+        <p className="text-slate-600 dark:text-neutral-400 font-medium leading-relaxed">
           {answer}
         </p>
       </div>
@@ -154,7 +154,7 @@ const Help: React.FC = () => {
       <div className="max-w-3xl mx-auto px-4 py-20">
         {/* Header & Search */}
         <div className="text-center mb-12">
-          <h1 className="text-3xl md:text-4xl font-black text-slate-900 dark:text-slate-100 mb-6 font-poppins tracking-tight">
+          <h1 className="text-3xl md:text-4xl font-black text-slate-900 dark:text-neutral-100 mb-6 font-poppins tracking-tight">
             Billing & Payments Help
           </h1>
           <div className="relative max-w-lg mx-auto">
@@ -168,7 +168,7 @@ const Help: React.FC = () => {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search: upgrade, payment, plan…"
-              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl py-4 pl-14 pr-6 outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600 text-slate-900 dark:text-slate-100 font-bold transition-all shadow-sm"
+              className="w-full bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-2xl py-4 pl-14 pr-6 outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600 text-slate-900 dark:text-neutral-100 font-bold transition-all shadow-sm"
             />
           </div>
 
@@ -178,7 +178,7 @@ const Help: React.FC = () => {
               <button
                 key={tag}
                 onClick={() => setSearchQuery(tag)}
-                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[11px] font-black uppercase tracking-widest rounded-xl border border-transparent hover:border-blue-200 dark:hover:border-blue-800 hover:text-blue-600 dark:hover:text-blue-400 transition-all active:scale-95"
+                className="px-4 py-2 bg-slate-100 dark:bg-neutral-900 text-slate-600 dark:text-neutral-400 text-[11px] font-black uppercase tracking-widest rounded-xl border border-transparent hover:border-blue-200 dark:hover:border-blue-800 hover:text-blue-600 dark:hover:text-blue-400 transition-all active:scale-95"
               >
                 {tag}
               </button>
@@ -187,7 +187,7 @@ const Help: React.FC = () => {
         </div>
 
         {/* FAQ List */}
-        <div className="bg-white dark:bg-slate-800 rounded-[2.5rem] p-8 md:p-12 border border-slate-100 dark:border-slate-700 shadow-sm transition-colors mb-10">
+        <div className="bg-white dark:bg-neutral-900 rounded-[2.5rem] p-8 md:p-12 border border-slate-100 dark:border-neutral-800 shadow-sm transition-colors mb-10">
           <div className="space-y-1">
             {filteredFaqs.length > 0 ? (
               filteredFaqs.map((faq, index) => (
@@ -200,7 +200,7 @@ const Help: React.FC = () => {
               ))
             ) : (
               <div className="py-12 text-center">
-                <p className="text-slate-500 dark:text-slate-400 font-bold">
+                <p className="text-slate-500 dark:text-neutral-400 font-bold">
                   No results found. Contact <a href="mailto:support@yourapp.com" className="text-blue-600 dark:text-blue-400 hover:underline">support@yourapp.com</a>
                 </p>
               </div>
@@ -210,10 +210,10 @@ const Help: React.FC = () => {
 
         {/* Footer info */}
         <div className="text-center space-y-4">
-          <p className="text-slate-500 dark:text-slate-400 font-medium text-sm">
+          <p className="text-slate-500 dark:text-neutral-400 font-medium text-sm">
             For more help contact: <a href="mailto:support@yourapp.com" className="text-blue-600 dark:text-blue-400 font-bold hover:underline">support@yourapp.com</a>
           </p>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500 font-black uppercase tracking-[0.2em]">
+          <p className="text-[11px] text-slate-400 dark:text-neutral-400 font-black uppercase tracking-[0.2em]">
             Your personal data is secure and never shared with third parties.
           </p>
         </div>

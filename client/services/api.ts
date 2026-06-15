@@ -1,10 +1,16 @@
-import { clearToken, getToken } from "./storage";
-
 const DEFAULT_BASE_URL = "http://localhost:5000/api";
 const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || DEFAULT_BASE_URL;
 const IS_DEV = Boolean((import.meta as any).env?.DEV);
 
 const RETRY_STATUSES = new Set([502, 503, 504]);
+
+type AuthTokenGetter = (() => Promise<string | null>) | null;
+
+let authTokenGetter: AuthTokenGetter = null;
+
+export function setAuthTokenGetter(getter: AuthTokenGetter) {
+  authTokenGetter = getter;
+}
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -26,7 +32,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let lastErr: unknown = null;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const token = getToken();
+    const token = authTokenGetter ? await authTokenGetter() : null;
     const headers = new Headers(init.headers);
     headers.set("content-type", "application/json");
     if (token) headers.set("authorization", `Bearer ${token}`);
@@ -48,10 +54,6 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
             }
           })()
         : null;
-
-      if (res.status === 401) {
-        clearToken();
-      }
 
       if (!res.ok) {
         const message =
@@ -93,4 +95,7 @@ export const api = {
   get: <T>(path: string) => request<T>(path, { method: "GET" }),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "POST", body: body === undefined ? "{}" : JSON.stringify(body) }),
+  put: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: "PUT", body: body === undefined ? "{}" : JSON.stringify(body) }),
+  delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
 };

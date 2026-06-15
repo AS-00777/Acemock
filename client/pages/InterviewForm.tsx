@@ -46,18 +46,18 @@ const InterviewForm: React.FC = () => {
     }
   };
 
-  const labelClass = "text-sm font-black text-gray-700 dark:text-slate-400 uppercase tracking-widest ml-1";
-  const inputClass = "w-full bg-gray-50/80 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-2xl px-6 py-4 focus:ring-4 focus:ring-blue-100 dark:focus:ring-blue-900/20 focus:border-blue-500 dark:focus:border-blue-400 outline-none transition-all text-gray-900 dark:text-slate-100 font-semibold shadow-sm";
+  const labelClass = "text-sm font-black text-gray-700 dark:text-neutral-400 uppercase tracking-widest ml-1";
+  const inputClass = "w-full bg-gray-50/80 dark:bg-neutral-950 border border-gray-200 dark:border-neutral-800 rounded-2xl px-6 py-4 focus:ring-4 focus:ring-blue-100 dark:focus:ring-blue-500/20 focus:border-blue-500 dark:focus:border-blue-400 outline-none transition-all text-gray-900 dark:text-neutral-100 font-semibold shadow-sm";
 
   return (
     <Layout>
-      <div className="max-w-4xl mx-auto px-4 py-16 bg-gray-50/30 dark:bg-slate-900 transition-colors duration-200">
-        <div className="bg-white dark:bg-slate-800 rounded-[3rem] border border-gray-100 dark:border-slate-700 shadow-[0_30px_70px_-20px_rgba(0,0,0,0.1)] p-10 md:p-16 relative overflow-hidden transition-colors">
-          <div className="absolute top-0 right-0 w-48 h-48 bg-blue-50/50 dark:bg-blue-900/10 rounded-bl-[10rem] opacity-70 -z-0"></div>
+      <div className="max-w-4xl mx-auto px-4 py-16 bg-gray-50/30 dark:bg-neutral-950 transition-colors duration-200">
+        <div className="bg-white dark:bg-neutral-900 rounded-[3rem] border border-gray-100 dark:border-neutral-800 shadow-[0_30px_70px_-20px_rgba(0,0,0,0.1)] p-10 md:p-16 relative overflow-hidden transition-colors">
+          <div className="absolute top-0 right-0 w-48 h-48 bg-blue-50/50 dark:bg-neutral-950 rounded-bl-[10rem] opacity-70 -z-0"></div>
           
           <div className="relative z-10 text-center mb-12">
-            <h1 className="text-4xl font-extrabold text-gray-900 dark:text-slate-100 mb-3">Customize Your Mock</h1>
-            <p className="text-gray-500 dark:text-slate-400 text-xl font-medium">Configure your experience and let Gemini AI build your session.</p>
+            <h1 className="text-4xl font-extrabold text-gray-900 dark:text-neutral-100 mb-3">Customize Your Mock</h1>
+            <p className="text-gray-500 dark:text-neutral-400 text-xl font-medium">Configure your experience and let Gemini AI build your session.</p>
           </div>
 
           {error && (
@@ -81,7 +81,7 @@ const InterviewForm: React.FC = () => {
                   value={formData.domain}
                   onChange={e => setFormData({...formData, domain: e.target.value})}
                 >
-                  {DOMAINS.map(d => <option key={d} value={d} className="bg-white dark:bg-slate-800">{d}</option>)}
+                  {DOMAINS.map(d => <option key={d} value={d} className="bg-white dark:bg-neutral-900">{d}</option>)}
                 </select>
               </div>
               
@@ -102,7 +102,7 @@ const InterviewForm: React.FC = () => {
               <label className={labelClass}>Keywords & Tech Stack (e.g. React, SQL, Logic)</label>
               <textarea 
                 placeholder="List specific technologies or concepts you want to be tested on..."
-                className={inputClass + " h-44 resize-none placeholder-gray-400 dark:placeholder-slate-500"}
+                className={inputClass + " h-44 resize-none placeholder-gray-400 dark:placeholder-neutral-500"}
                 value={formData.skills}
                 onChange={e => setFormData({...formData, skills: e.target.value})}
                 required
@@ -120,7 +120,7 @@ const InterviewForm: React.FC = () => {
                     className={`flex-1 py-4 rounded-2xl font-black text-lg transition-all transform active:scale-95 shadow-md ${
                       formData.difficulty === d 
                       ? 'bg-blue-600 text-white shadow-blue-200 dark:shadow-none ring-4 ring-blue-50 dark:ring-blue-900/20' 
-                      : 'bg-white dark:bg-slate-900 text-gray-500 dark:text-slate-400 border border-gray-100 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700'
+                      : 'bg-white dark:bg-neutral-950 text-gray-500 dark:text-neutral-400 border border-gray-100 dark:border-neutral-800 hover:bg-gray-50 dark:hover:bg-neutral-800'
                     }`}
                   >
                     {d}

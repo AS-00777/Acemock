@@ -1,8 +1,8 @@
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import { clerkMiddleware } from "@clerk/express";
 import { env } from "./config/env";
-import authRoutes from "./routes/auth.routes";
 import userRoutes from "./routes/user.routes";
 import interviewRoutes from "./routes/interview.routes";
 import { errorHandler, notFound } from "./middleware/error.middleware";
@@ -15,17 +15,16 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "3mb" }));
 app.use(cookieParser());
+app.use(clerkMiddleware({ secretKey: env.CLERK_SECRET_KEY }));
 
 app.get("/", (_req, res) => {
   res.send("AceMock AI Backend Running");
 });
 
-app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/interview", interviewRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
-
