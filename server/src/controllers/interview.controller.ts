@@ -1,12 +1,16 @@
 import { Response, NextFunction } from "express";
+import fs from "fs";
 import { AuthRequest } from "../types/request";
 import { ApiError } from "../middleware/error.middleware";
 import {
   addOrGenerateQuestion,
+  canRunCodeLanguage,
   completeInterview,
   deleteInterview,
   getInterviewDetails,
   getInterviewHistory,
+  runCodeForQuestion,
+  saveAudioAnswerUpload,
   saveAnswerWithEvaluation,
   startInterview,
 } from "../services/interview.service";
@@ -107,9 +111,44 @@ export const question = async (
                 return [];
               }
             })(),
+        testCases: Array.isArray((q as any).test_cases)
+          ? (q as any).test_cases
+          : (() => {
+              try {
+                return JSON.parse((q as any).test_cases ?? "[]");
+              } catch {
+                return [];
+              }
+            })(),
         difficulty: (q as any).difficulty ?? null,
         topic: (q as any).topic ?? null,
-        type: (q as any).question_type === "coding" ? "coding" : "theory",
+        skill: (q as any).skill ?? null,
+        language: (q as any).language ?? null,
+        starterCode: (q as any).starter_code ?? null,
+        constraints: Array.isArray((q as any).constraints_json)
+          ? (q as any).constraints_json
+          : (() => {
+              try {
+                return JSON.parse((q as any).constraints_json ?? "[]");
+              } catch {
+                return [];
+              }
+            })(),
+        expectedOutput: (q as any).expected_output ?? null,
+        evaluationType: (q as any).evaluation_type ?? null,
+        canRunCode: (q as any).question_type === "coding" && canRunCodeLanguage((q as any).language),
+        options: Array.isArray((q as any).options_json)
+          ? (q as any).options_json
+          : (() => {
+              try {
+                return JSON.parse((q as any).options_json ?? "[]");
+              } catch {
+                return [];
+              }
+            })(),
+        expectedTimeComplexity: (q as any).expected_time_complexity ?? null,
+        expectedSpaceComplexity: (q as any).expected_space_complexity ?? null,
+        type: (q as any).question_type ?? "theory",
         createdAt: q.created_at,
       },
     });
@@ -208,7 +247,7 @@ export const answer = async (
       userId: req.user.id,
       interviewId,
       questionId: result.answer.question_id,
-      score: result.evaluation.score,
+      score: null,
     });
 
     res.status(201).json({
@@ -244,6 +283,116 @@ export const answer = async (
       },
       evaluation: result.evaluation,
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const audioAnswer = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    if (!req.user) throw new ApiError(401, "Unauthorized");
+
+    const file = req.file;
+    if (!file) throw new ApiError(400, "audio file is required");
+    if (!file.size) throw new ApiError(400, "audio file is empty");
+
+    const rawInterviewId = req.body?.interviewId ?? req.body?.sessionId;
+    const interviewId = Number(rawInterviewId);
+    if (!Number.isFinite(interviewId) || interviewId <= 0) {
+      throw new ApiError(400, "interviewId or sessionId is required");
+    }
+
+    const questionId = Number(req.body?.questionId);
+    if (!Number.isFinite(questionId) || questionId <= 0) {
+      throw new ApiError(400, "questionId is required");
+    }
+
+    const answerId =
+      req.body?.answerId !== undefined && String(req.body.answerId).trim() !== ""
+        ? Number(req.body.answerId)
+        : undefined;
+    if (answerId !== undefined && (!Number.isFinite(answerId) || answerId <= 0)) {
+      throw new ApiError(400, "Invalid answerId");
+    }
+
+    const questionText =
+      typeof req.body?.questionText === "string"
+        ? req.body.questionText.trim()
+        : undefined;
+
+    const audioFilePath = file.path.replace(/\\/g, "/");
+    const saved = await saveAudioAnswerUpload({
+      userId: req.user.id,
+      interviewId,
+      questionId,
+      answerId,
+      audioFilePath,
+    });
+
+    console.info("[interview] audio answer", {
+      userId: req.user.id,
+      interviewId,
+      questionId,
+      answerId: saved.answerId,
+      bytes: file.size,
+      mimetype: file.mimetype,
+      hasQuestionText: Boolean(questionText),
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Audio answer received successfully",
+      audioReceived: true,
+      answerId: saved.answerId,
+      audioFilePath: saved.audioFilePath,
+      audioStatus: saved.audioStatus,
+      transcript: saved.transcript,
+      rawTranscript: saved.rawTranscript,
+      correctedTranscript: saved.correctedTranscript,
+      transcriptionEngine: saved.transcriptionEngine,
+    });
+  } catch (err) {
+    if (req.file?.path) {
+      fs.promises.unlink(req.file.path).catch(() => {});
+    }
+    next(err);
+  }
+};
+
+export const runCode = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    if (!req.user) throw new ApiError(401, "Unauthorized");
+
+    const interviewId = Number(req.params.id);
+    if (!Number.isFinite(interviewId))
+      throw new ApiError(400, "Invalid interview id");
+
+    const questionId = Number(req.body?.questionId);
+    if (!Number.isFinite(questionId) || questionId <= 0)
+      throw new ApiError(400, "Invalid questionId");
+
+    const language = String(req.body?.language ?? "").trim();
+    if (!language) throw new ApiError(400, "language is required");
+
+    const code = typeof req.body?.code === "string" ? req.body.code : "";
+
+    const result = await runCodeForQuestion({
+      interviewId,
+      userId: req.user.id,
+      questionId,
+      code,
+      language,
+    });
+
+    res.status(200).json(result);
   } catch (err) {
     next(err);
   }

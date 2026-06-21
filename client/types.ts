@@ -65,10 +65,8 @@ export interface AnswerRecord {
   userAnswer: string;
   feedback?: string;
   score?: number;
-  technicalAccuracy?: number;
-  conceptCoverage?: number;
-  communicationScore?: number;
-  semanticSimilarity?: number;
+  type?: 'theory' | 'coding' | 'mcq' | 'practical' | 'scenario';
+  factorScores?: Record<string, number>;
   matchedConcepts?: string[];
   missingConcepts?: string[];
   codingAnswer?: string;

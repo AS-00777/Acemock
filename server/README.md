@@ -21,6 +21,11 @@ Copy `server/.env.example` to `server/.env` and fill values:
 - `DATABASE_URL=mysql://user:password@localhost:3306/acemock`
 - `JWT_SECRET=...`
 - `GEMINI_API_KEY=...`
+- `OPENROUTER_API_KEY=...`
+- `ROBOFLOW_API_KEY=...` (server-side only; used by interview proctoring)
+- `ROBOFLOW_API_URL=https://serverless.roboflow.com`
+- `ROBOFLOW_WORKSPACE=atharvas-workspace-fr8mu`
+- `ROBOFLOW_WORKFLOW_ID=yolov11`
 
 ## 3) Install dependencies
 
@@ -35,6 +40,11 @@ npm install
 cd server
 mysql -u root -p acemock < migrations/001_init.sql
 mysql -u root -p acemock < migrations/002_interview_enhancements.sql
+mysql -u root -p acemock < migrations/003_evaluation_rubrics.sql
+mysql -u root -p acemock < migrations/004_clerk_auth.sql
+mysql -u root -p acemock < migrations/005_user_profile_search_columns.sql
+mysql -u root -p acemock < migrations/006_answer_rubric_factors.sql
+mysql -u root -p acemock < migrations/007_proctoring_bans.sql
 ```
 
 This creates the tables (`users`, `interviews`, `questions`, `answers`, `results`) and adds interview enhancements (difficulty + question type + richer answer evaluation).
@@ -80,6 +90,12 @@ If your frontend uses an API base URL, point it to:
 - `POST /api/interview/:id/complete`
 - `GET /api/interview/history?page=1&limit=10`
 - `GET /api/interview/:id`
+- `POST /api/proctoring/check-frame` (body: `{ interviewId, frame }`; frame is a webcam image data URL or base64)
+- `GET /api/proctoring/check-ban`
+
+## Proctoring
+
+The proctoring module calls the Roboflow `YOLOv11` workflow from the backend using native Node `fetch`, `FormData`, and `Blob`. It posts multipart form data to `/infer/workflows/{workspace}/{workflow_id}?api_key=...` with the webcam frame attached as the field named `image`. It detects repeated monitoring violations for multiple persons and mobile phones. A warning is counted only after 3 consecutive violating checks; the fourth confirmed warning completes the interview, stores `warning_count`, bans the user for 3 hours with `banned_until` and `ban_reason`, and blocks new interview starts until the ban expires.
 
 ## Auth notes
 - Send JWT on protected routes using: `Authorization: Bearer <token>`

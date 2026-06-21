@@ -14,6 +14,11 @@ export const env = {
   CLERK_SECRET_KEY: requireEnv("CLERK_SECRET_KEY"),
   JWT_SECRET: process.env.JWT_SECRET ?? "unused-clerk-jwt-secret",
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+  ROBOFLOW_API_KEY: process.env.ROBOFLOW_API_KEY,
+  ROBOFLOW_API_URL: process.env.ROBOFLOW_API_URL,
+  ROBOFLOW_WORKSPACE: process.env.ROBOFLOW_WORKSPACE,
+  ROBOFLOW_WORKFLOW_ID: process.env.ROBOFLOW_WORKFLOW_ID,
+  NODE_ENV: process.env.NODE_ENV ?? "development",
   FRONTEND_ORIGIN: process.env.FRONTEND_ORIGIN,
 };
 

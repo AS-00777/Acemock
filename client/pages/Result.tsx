@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { api, ApiError } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { normalizeConfidence, type ConfidenceLevel } from '../utils/confidence';
 
 type InterviewDetails = {
   interview: {
@@ -17,24 +18,28 @@ type InterviewDetails = {
       keyConcepts?: string[];
       topic?: string | null;
       difficulty?: 'easy' | 'medium' | 'hard' | null;
-      type?: 'theory' | 'coding';
+      type?: 'theory' | 'coding' | 'mcq' | 'practical' | 'scenario';
       answers: Array<{
         id: number;
         answerText: string;
+        rawTranscript?: string | null;
+        correctedTranscript?: string | null;
         code?: string | null;
         language?: string | null;
         score: number | null;
-        technicalAccuracy?: number | null;
-        conceptCoverage?: number | null;
-        communicationScore?: number | null;
-        semanticSimilarity?: number | null;
         finalScore?: number | null;
+        factorScores?: Record<string, number> | null;
         matchedConcepts?: string[];
         missingConcepts?: string[];
         rating?: 'Poor' | 'Average' | 'Good' | 'Excellent' | null;
         feedback: string | null;
         strengths?: string | null;
         weaknesses?: string | null;
+        suggestions?: string | null;
+        confidenceScore?: number | string | null;
+        confidenceLevel?: 'High' | 'Medium' | 'Low' | null;
+        confidenceReasons?: string[];
+        confidenceTips?: string[];
         createdAt: string;
       }>;
     }>;
@@ -103,6 +108,41 @@ function FormattedFeedback({ text, compact = false }: { text?: string; compact?:
   );
 }
 
+const theoryFactorLabels: Array<[string, string]> = [
+  ['relevance', 'Relevance'],
+  ['technicalAccuracy', 'Technical Accuracy'],
+  ['completeness', 'Completeness'],
+  ['communicationClarity', 'Communication'],
+  ['structureOrganization', 'Structure'],
+  ['examplesPracticalKnowledge', 'Examples'],
+  ['confidenceFluency', 'Fluency'],
+];
+
+const codingFactorLabels: Array<[string, string]> = [
+  ['correctness', 'Correctness'],
+  ['logicProblemSolving', 'Logic'],
+  ['timeComplexity', 'Time Complexity'],
+  ['spaceComplexity', 'Space Complexity'],
+  ['codeQuality', 'Code Quality'],
+  ['edgeCaseHandling', 'Edge Cases'],
+  ['explanationCommunication', 'Explanation'],
+];
+
+function getRubricFactors(type: 'theory' | 'coding' | 'mcq' | 'practical' | 'scenario' | undefined, factorScores?: Record<string, number> | null) {
+  const labels = type === 'coding' ? codingFactorLabels : theoryFactorLabels;
+  return labels.map(([key, label]) => ({
+    label,
+    value: typeof factorScores?.[key] === 'number' ? factorScores[key] : undefined,
+  }));
+}
+
+function getConfidenceTone(level: ConfidenceLevel | null) {
+  if (level === 'High') return 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/30';
+  if (level === 'Medium') return 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30';
+  if (level === 'Low') return 'text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-900/30';
+  return 'text-slate-600 dark:text-neutral-300 bg-slate-100 dark:bg-neutral-800';
+}
+
 const Result: React.FC = () => {
   const { id } = useParams();
   const interviewId = Number(id);
@@ -134,17 +174,21 @@ const Result: React.FC = () => {
           keyConcepts: q.keyConcepts ?? [],
           topic: q.topic ?? undefined,
           difficulty: q.difficulty ?? undefined,
-          userAnswer: a.answerText,
+          userAnswer: a.correctedTranscript?.trim() || a.answerText,
+          rawTranscript: a.rawTranscript ?? undefined,
+          correctedTranscript: a.correctedTranscript ?? undefined,
           feedback: a.feedback ?? undefined,
           score: a.finalScore ?? (a.score === null ? 0 : a.score * 10),
-          technicalAccuracy: a.technicalAccuracy ?? undefined,
-          conceptCoverage: a.conceptCoverage ?? undefined,
-          communicationScore: a.communicationScore ?? undefined,
-          semanticSimilarity: a.semanticSimilarity ?? undefined,
+          type: q.type ?? 'theory',
+          factorScores: a.factorScores ?? null,
           matchedConcepts: a.matchedConcepts ?? [],
           missingConcepts: a.missingConcepts ?? [],
           strengths: a.strengths ?? undefined,
           weaknesses: a.weaknesses ?? undefined,
+          suggestions: a.suggestions ?? undefined,
+          confidenceScore: a.confidenceScore ?? undefined,
+          confidenceReasons: a.confidenceReasons ?? [],
+          confidenceTips: a.confidenceTips ?? [],
           codingAnswer: a.code ?? (a.answerText.includes('\n\nCODE:\n') ? a.answerText.split('\n\nCODE:\n')[1] : undefined),
           language: a.language ?? undefined,
           rating: a.rating ?? undefined,
@@ -232,7 +276,16 @@ const Result: React.FC = () => {
                   
                   <div className="space-y-6">
                     <div>
-                      <h4 className="text-xs font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest mb-3 ml-1">Your Answer</h4>
+                      <div className="flex items-center gap-2 mb-3 ml-1">
+                        <h4 className="text-xs font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest">
+                          Your Answer
+                        </h4>
+                        {item.correctedTranscript && (
+                          <span className="px-2 py-1 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200 text-[10px] font-black uppercase tracking-widest">
+                            Cleaned transcript
+                          </span>
+                        )}
+                      </div>
                       <div className="min-h-16 p-5 sm:p-6 bg-slate-50/50 dark:bg-neutral-950/50 rounded-2xl text-slate-600 dark:text-neutral-300 text-sm leading-relaxed border-2 border-dashed border-blue-400/40 dark:border-blue-900/40">
                         {item.userAnswer || <span className="text-slate-400 dark:text-neutral-400">No verbal answer provided.</span>}
                       </div>
@@ -240,9 +293,11 @@ const Result: React.FC = () => {
                     {item.codingAnswer && (
                       <div>
                         <h4 className="text-xs font-black text-purple-600 dark:text-purple-400 uppercase tracking-widest mb-3 ml-1">Code Submission</h4>
-                        <pre className="max-h-[420px] p-5 sm:p-6 bg-slate-950 dark:bg-black text-emerald-400 rounded-3xl font-mono text-sm overflow-auto shadow-inner">
-                          {item.codingAnswer}
-                        </pre>
+                        <div className="max-w-full overflow-hidden rounded-2xl border border-slate-200 dark:border-neutral-700 bg-slate-50 dark:bg-neutral-800/70 shadow-sm">
+                          <pre className="max-h-[420px] max-w-full overflow-auto p-4 sm:p-6 font-mono text-xs sm:text-sm leading-6 text-slate-800 dark:text-neutral-100 whitespace-pre tab-4">
+                            <code className="block min-w-max">{item.codingAnswer}</code>
+                          </pre>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -251,21 +306,65 @@ const Result: React.FC = () => {
                 <aside className="w-full p-5 sm:p-6 bg-blue-50/50 dark:bg-neutral-900 rounded-3xl flex flex-col gap-5 border border-blue-100 dark:border-neutral-800 relative overflow-hidden transition-colors">
                    <div className="relative z-10">
                     <h4 className="text-xs font-black text-blue-700 dark:text-blue-400 uppercase tracking-widest mb-4">Correction / Suggestion</h4>
-                    <FormattedFeedback compact text={item.feedback || "Review your approach for optimization and clarity. Ensure you're addressing the core logic efficiently."} />
+                    <FormattedFeedback compact text={item.suggestions || item.feedback || "Review the weakest rubric areas and add concrete details, tradeoffs, and edge cases where relevant."} />
                   </div>
                   <div className="relative z-10 grid grid-cols-2 gap-3">
-                    {[
-                      ['Accuracy', item.technicalAccuracy],
-                      ['Coverage', item.conceptCoverage],
-                      ['Similarity', item.semanticSimilarity],
-                      ['Comms', item.communicationScore],
-                    ].map(([label, value]) => (
-                      <div key={label as string} className="rounded-2xl bg-white/70 dark:bg-neutral-950/70 border border-blue-100 dark:border-neutral-800 p-3">
+                    <h4 className="col-span-2 text-[10px] font-black text-slate-500 dark:text-neutral-400 uppercase tracking-widest">Rubric Factors</h4>
+                    {getRubricFactors(item.type, item.factorScores).map(({ label, value }) => (
+                      <div key={label} className="rounded-2xl bg-white/70 dark:bg-neutral-950/70 border border-blue-100 dark:border-neutral-800 p-3">
                         <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-neutral-400">{label}</div>
                         <div className="text-lg font-black text-slate-900 dark:text-neutral-100">{typeof value === 'number' ? `${value}%` : 'N/A'}</div>
                       </div>
                     ))}
                   </div>
+                  {(() => {
+                    const confidence = normalizeConfidence(item.confidenceScore);
+                    return (
+                    <div className="relative z-10 rounded-2xl bg-white/70 dark:bg-neutral-950/70 border border-blue-100 dark:border-neutral-800 p-4">
+                      <div className="flex items-start justify-between gap-3 mb-3">
+                        <div>
+                          <h4 className="text-[10px] font-black text-slate-500 dark:text-neutral-400 uppercase tracking-widest">Communication Confidence Estimate</h4>
+                          <p className="mt-1 text-[11px] font-semibold text-slate-400 dark:text-neutral-500">Not a guaranteed measure of confidence.</p>
+                        </div>
+                        <span className={`shrink-0 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${getConfidenceTone(confidence.level)}`}>
+                          {confidence.level ?? 'Not available'}
+                        </span>
+                      </div>
+                      {confidence.score === null ? (
+                        <p className="text-sm font-semibold text-slate-500 dark:text-neutral-400">Confidence score is not available.</p>
+                      ) : (
+                        <div className="flex items-center gap-3">
+                          <div className="flex-1 h-3 rounded-full bg-slate-200 dark:bg-neutral-800 overflow-hidden">
+                            <div
+                              className="h-full bg-blue-600 dark:bg-blue-400 transition-[width] duration-300"
+                              style={{ width: `${confidence.score}%` }}
+                            />
+                          </div>
+                          <div className="text-lg font-black text-slate-900 dark:text-neutral-100 tabular-nums">{confidence.score}%</div>
+                        </div>
+                      )}
+                      {item.confidenceReasons.length > 0 && (
+                        <div className="mt-4 space-y-2">
+                          {item.confidenceReasons.slice(0, 3).map((reason: string) => (
+                            <p key={reason} className="text-xs font-semibold text-slate-600 dark:text-neutral-300">{reason}</p>
+                          ))}
+                        </div>
+                      )}
+                      {item.confidenceTips.length > 0 && (
+                        <div className="mt-4 pt-4 border-t border-blue-100 dark:border-neutral-800">
+                          <h5 className="text-[10px] font-black uppercase tracking-widest text-blue-700 dark:text-blue-300 mb-2">Improve</h5>
+                          <p className="text-xs font-semibold leading-5 text-slate-600 dark:text-neutral-300">{item.confidenceTips[0]}</p>
+                        </div>
+                      )}
+                    </div>
+                    );
+                  })()}
+                  {item.feedback && (
+                    <div className="relative z-10">
+                      <h4 className="text-[10px] font-black text-slate-500 dark:text-neutral-400 uppercase tracking-widest mb-2">Feedback</h4>
+                      <FormattedFeedback compact text={item.feedback} />
+                    </div>
+                  )}
                   {(item.matchedConcepts.length > 0 || item.missingConcepts.length > 0) && (
                     <div className="relative z-10 space-y-4">
                       {item.matchedConcepts.length > 0 && (

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { Icons, DOMAINS } from '../constants';
@@ -17,6 +17,17 @@ const ResumeInterview: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const { logout } = useAuth();
+
+  useEffect(() => {
+    api
+      .get<{ banned: boolean; message: string | null }>('/proctoring/check-ban')
+      .then((status) => {
+        if (status.banned && status.message) setError(status.message);
+      })
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 401) logout();
+      });
+  }, [logout]);
 
   const handleFile = (selectedFile: File) => {
     setError('');
@@ -81,9 +92,9 @@ const ResumeInterview: React.FC = () => {
       const newId = resp?.interviewId ?? resp?.interview?.id;
       if (!newId) throw new Error("Failed to start interview.");
       navigate(`/interview-session/${newId}`);
-    } catch (err) {
+    } catch (err: any) {
       if (err instanceof ApiError && err.status === 401) logout();
-      setError('Failed to prepare session. Please try again.');
+      setError(err?.message || 'Failed to prepare session. Please try again.');
     } finally {
       setLoadingQuestions(false);
     }

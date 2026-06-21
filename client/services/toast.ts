@@ -20,3 +20,6 @@ export function toastError(message: string, durationMs?: number) {
   toast({ kind: "error", message, durationMs });
 }
 
+export function toastInfo(message: string, durationMs?: number) {
+  toast({ kind: "info", message, durationMs });
+}

@@ -34,7 +34,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const token = authTokenGetter ? await authTokenGetter() : null;
     const headers = new Headers(init.headers);
-    headers.set("content-type", "application/json");
+    const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
+    if (!isFormData) headers.set("content-type", "application/json");
     if (token) headers.set("authorization", `Bearer ${token}`);
 
     try {
@@ -95,6 +96,8 @@ export const api = {
   get: <T>(path: string) => request<T>(path, { method: "GET" }),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "POST", body: body === undefined ? "{}" : JSON.stringify(body) }),
+  postForm: <T>(path: string, body: FormData) =>
+    request<T>(path, { method: "POST", body }),
   put: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "PUT", body: body === undefined ? "{}" : JSON.stringify(body) }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),

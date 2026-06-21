@@ -26,6 +26,7 @@ function loadEnvFile(filePath) {
 module.exports = (_env, argv) => {
   const isProd = argv.mode === "production";
   const localEnv = loadEnvFile(path.resolve(__dirname, ".env.local"));
+
   const env = {
     ...localEnv,
     ...process.env,
@@ -33,7 +34,13 @@ module.exports = (_env, argv) => {
 
   return {
     target: "web",
+
+    experiments: {
+      asyncWebAssembly: true,
+    },
+
     entry: path.resolve(__dirname, "index.tsx"),
+
     output: {
       path: path.resolve(__dirname, "dist"),
       filename: isProd ? "assets/[name].[contenthash].js" : "assets/[name].js",
@@ -41,13 +48,16 @@ module.exports = (_env, argv) => {
       publicPath: "/",
       clean: true,
     },
+
     devtool: isProd ? "source-map" : "eval-cheap-module-source-map",
+
     resolve: {
       extensions: [".tsx", ".ts", ".js"],
       alias: {
         "@": path.resolve(__dirname, "."),
       },
     },
+
     module: {
       rules: [
         {
@@ -73,8 +83,13 @@ module.exports = (_env, argv) => {
             "postcss-loader",
           ],
         },
+        {
+          test: /\.lottie$/,
+          type: "asset/resource",
+        },
       ],
     },
+
     plugins: [
       new webpack.DefinePlugin({
         "import.meta.env": JSON.stringify({
@@ -83,15 +98,18 @@ module.exports = (_env, argv) => {
           VITE_CLERK_PUBLISHABLE_KEY: env.VITE_CLERK_PUBLISHABLE_KEY,
         }),
       }),
+
       new HtmlWebpackPlugin({
         template: path.resolve(__dirname, "index.html"),
       }),
+
       new webpack.DefinePlugin({
         "process.env.REACT_APP_CLERK_PUBLISHABLE_KEY": JSON.stringify(
           process.env.REACT_APP_CLERK_PUBLISHABLE_KEY
         ),
       }),
     ],
+
     devServer: {
       host: "0.0.0.0",
       port: 3000,
@@ -101,6 +119,7 @@ module.exports = (_env, argv) => {
         overlay: true,
       },
     },
+
     performance: { hints: false },
     stats: "errors-warnings",
   };

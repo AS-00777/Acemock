@@ -6,10 +6,14 @@ export const DOMAINS = [
   'Backend Engineering',
   'Full Stack Development',
   'Data Science',
+  'Data Analyst',
+  'Machine Learning Engineer',
+  'QA / Software Testing',
   'Product Management',
   'UX/UI Design',
   'Cloud Architecture',
-  'Cybersecurity'
+  'Cybersecurity',
+  'DevOps Engineer'
 ];
 
 export const DIFFICULTIES = ['Easy', 'Medium', 'Hard'];

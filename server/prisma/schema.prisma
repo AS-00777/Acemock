@@ -21,6 +21,8 @@ model User {
   authProvider String @default("clerk") @map("auth_provider")
   createdAt DateTime  @default(now()) @map("created_at")
   deletedAt DateTime? @map("deleted_at")
+  bannedUntil DateTime? @map("banned_until")
+  banReason String? @map("ban_reason") @db.Text
 
   interviews Interview[]
 
@@ -34,6 +36,7 @@ model Interview {
   experience String
   techStack  Json           @map("tech_stack")
   status     InterviewStatus @default(IN_PROGRESS)
+  warningCount Int          @default(0) @map("warning_count")
   createdAt  DateTime       @default(now()) @map("created_at")
   completedAt DateTime?     @map("completed_at")
 
@@ -54,6 +57,19 @@ model Question {
   keyConcepts Json?     @map("key_concepts")
   difficulty  String?
   topic       String?
+  skill       String?
+  language    String?
+  starterCode String?   @map("starter_code") @db.Text
+  testCases   Json?     @map("test_cases")
+  hiddenTestCases Json? @map("hidden_test_cases")
+  constraints Json?     @map("constraints_json")
+  expectedOutput String? @map("expected_output") @db.Text
+  evaluationType String? @map("evaluation_type")
+  options     Json?     @map("options_json")
+  correctOption String? @map("correct_option")
+  explanation String?   @db.Text
+  expectedTimeComplexity String? @map("expected_time_complexity")
+  expectedSpaceComplexity String? @map("expected_space_complexity")
   createdAt   DateTime  @default(now()) @map("created_at")
 
   interview   Interview @relation(fields: [interviewId], references: [id])
@@ -76,11 +92,31 @@ model Answer {
   finalScore Int? @map("final_score")
   matchedConcepts Json? @map("matched_concepts")
   missingConcepts Json? @map("missing_concepts")
+  factorScores Json? @map("factor_scores")
   rating     String?
   language   String?
+  audioFilePath String? @map("audio_file_path") @db.VarChar(1024)
+  audioStatus String? @map("audio_status")
+  audioDeletedAt DateTime? @map("audio_deleted_at")
+  transcript String? @db.Text
+  rawTranscript String? @map("raw_transcript") @db.Text
+  correctedTranscript String? @map("corrected_transcript") @db.Text
+  nlpScore Int? @map("nlp_score")
+  answerLength Int? @map("answer_length")
+  nlpMissingConcepts Json? @map("nlp_missing_concepts")
+  fillerWordsCount Int? @default(0) @map("filler_words_count")
+  fluencyScore Int? @map("fluency_score")
+  clarityScore Int? @map("clarity_score")
+  nlpSummary String? @map("nlp_summary") @db.Text
+  aiScore Int? @map("ai_score")
+  confidenceScore Int? @map("confidence_score")
+  confidenceLevel String? @map("confidence_level")
+  confidenceReasons Json? @map("confidence_reasons")
+  confidenceTips Json? @map("confidence_tips")
   feedback   String?  @db.Text
   strengths  String?  @db.Text
   weaknesses String?  @db.Text
+  suggestions String? @db.Text
   createdAt  DateTime @default(now()) @map("created_at")
 
   question   Question @relation(fields: [questionId], references: [id])

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { DOMAINS, DIFFICULTIES } from '../constants';
@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext';
 
 const InterviewForm: React.FC = () => {
   const [loading, setLoading] = useState(false);
+  const startInFlightRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     domain: DOMAINS[0],
@@ -17,22 +18,47 @@ const InterviewForm: React.FC = () => {
   const navigate = useNavigate();
   const { logout } = useAuth();
 
+  useEffect(() => {
+    api
+      .get<{ banned: boolean; message: string | null }>('/proctoring/check-ban')
+      .then((status) => {
+        if (status.banned && status.message) setError(status.message);
+      })
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 401) logout();
+      });
+  }, [logout]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (startInFlightRef.current) return;
+    startInFlightRef.current = true;
     setLoading(true);
     setError(null);
-    
+
     try {
-      const skillsArray = formData.skills.split(',').map(s => s.trim()).filter(s => s !== '');
+      const requestSnapshot = {
+        domain: formData.domain.trim(),
+        experience: formData.experience,
+        difficulty: String(formData.difficulty).trim(),
+        skills: formData.skills.split(',').map(s => s.trim()).filter(Boolean),
+      };
+      if (!requestSnapshot.domain) {
+        throw new Error("Please select an interview domain.");
+      }
+      if (!requestSnapshot.difficulty) {
+        throw new Error("Please select a difficulty level.");
+      }
+      const skillsArray = requestSnapshot.skills;
       if (skillsArray.length === 0) {
-        throw new Error("Please list at least one skill.");
+        throw new Error("Please select at least one skill before starting the interview.");
       }
 
       const resp = await api.post<any>('/interview/start', {
-        role: formData.domain,
-        experience: String(formData.experience),
-        difficulty: formData.difficulty,
-        techStack: { skills: skillsArray, difficulty: formData.difficulty, domain: formData.domain },
+        role: requestSnapshot.domain,
+        experience: String(requestSnapshot.experience),
+        difficulty: requestSnapshot.difficulty,
+        techStack: { skills: [...skillsArray], difficulty: requestSnapshot.difficulty, domain: requestSnapshot.domain },
       });
       const newId = resp?.interviewId ?? resp?.interview?.id;
       if (!newId) throw new Error("Failed to start interview.");
@@ -42,12 +68,13 @@ const InterviewForm: React.FC = () => {
       if (err instanceof ApiError && err.status === 401) logout();
       setError(err.message || 'An unexpected error occurred. Please check your internet and try again.');
     } finally {
+      startInFlightRef.current = false;
       setLoading(false);
     }
   };
 
   const labelClass = "text-sm font-black text-gray-700 dark:text-neutral-400 uppercase tracking-widest ml-1";
-  const inputClass = "w-full bg-gray-50/80 dark:bg-neutral-950 border border-gray-200 dark:border-neutral-800 rounded-2xl px-6 py-4 focus:ring-4 focus:ring-blue-100 dark:focus:ring-blue-500/20 focus:border-blue-500 dark:focus:border-blue-400 outline-none transition-all text-gray-900 dark:text-neutral-100 font-semibold shadow-sm";
+  const inputClass = "w-full bg-gray-50/80 dark:bg-neutral-950 border border-gray-200 dark:border-neutral-800 rounded-2xl px-6 py-4 focus:ring-4 focus:ring-blue-100 dark:focus:ring-blue-500/20 focus:border-blue-500 dark:focus:border-blue-400 outline-none transition-all text-gray-900 dark:text-neutral-100 font-semibold shadow-sm disabled:cursor-not-allowed disabled:opacity-60";
 
   return (
     <Layout>
@@ -79,6 +106,7 @@ const InterviewForm: React.FC = () => {
                 <select 
                   className={inputClass + " appearance-none cursor-pointer"}
                   value={formData.domain}
+                  disabled={loading}
                   onChange={e => setFormData({...formData, domain: e.target.value})}
                 >
                   {DOMAINS.map(d => <option key={d} value={d} className="bg-white dark:bg-neutral-900">{d}</option>)}
@@ -93,6 +121,7 @@ const InterviewForm: React.FC = () => {
                   max="50"
                   className={inputClass}
                   value={formData.experience}
+                  disabled={loading}
                   onChange={e => setFormData({...formData, experience: parseInt(e.target.value) || 0})}
                 />
               </div>
@@ -104,6 +133,7 @@ const InterviewForm: React.FC = () => {
                 placeholder="List specific technologies or concepts you want to be tested on..."
                 className={inputClass + " h-44 resize-none placeholder-gray-400 dark:placeholder-neutral-500"}
                 value={formData.skills}
+                disabled={loading}
                 onChange={e => setFormData({...formData, skills: e.target.value})}
                 required
               />
@@ -116,6 +146,7 @@ const InterviewForm: React.FC = () => {
                   <button
                     key={d}
                     type="button"
+                    disabled={loading}
                     onClick={() => setFormData({...formData, difficulty: d as any})}
                     className={`flex-1 py-4 rounded-2xl font-black text-lg transition-all transform active:scale-95 shadow-md ${
                       formData.difficulty === d 
@@ -138,7 +169,7 @@ const InterviewForm: React.FC = () => {
               {loading ? (
                 <span className="flex items-center justify-center gap-4">
                   <svg className="animate-spin h-7 w-7 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                  Initializing AI Agent...
+                  Preparing interview...
                 </span>
               ) : 'Start Interview Now'}
             </button>
