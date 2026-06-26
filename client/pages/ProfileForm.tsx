@@ -4,6 +4,7 @@ import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
 import { DOMAINS, DIFFICULTIES, LANGUAGES, EXPERIENCE_LEVELS, JOB_SEEKER_EXPERIENCE, USER_TYPES, EDUCATION_LEVELS, GENDERS, COUNTRY_CODES, LOCATION_DATA, Icons } from '../constants';
 import { UserProfile } from '../types';
+import AppLoadingScreen from '../components/AppLoadingScreen';
 
 const ProfileForm: React.FC = () => {
   const { profile, updateProfileExtras } = useAuth();
@@ -188,7 +189,7 @@ const ProfileForm: React.FC = () => {
     return '';
   };
 
-  if (!profile) return null;
+  if (!profile) return <AppLoadingScreen />;
 
   const availableCities = formData.country ? LOCATION_DATA[formData.country] || [] : [];
 

@@ -4,7 +4,8 @@ import { requireAuth } from "../middleware/auth.middleware";
 
 const router = Router();
 
-router.get("/check-ban", requireAuth, checkBan);
-router.post("/check-frame", requireAuth, checkFrame);
+router.use(requireAuth);
+router.get("/check-ban", checkBan);
+router.post("/check-frame", checkFrame);
 
 export default router;

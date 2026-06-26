@@ -288,11 +288,12 @@ function withDebug<T extends Record<string, unknown>>(payload: T, debug?: Procto
 
 async function getInterviewForMonitoring(interviewId: number, userId: number) {
   const rows = await query<InterviewMonitorRow[]>(
-    "SELECT id, user_id, status, warning_count FROM interviews WHERE id = ? AND user_id = ? LIMIT 1",
-    [interviewId, userId]
+    "SELECT id, user_id, status, warning_count FROM interviews WHERE id = ? LIMIT 1",
+    [interviewId]
   );
   const interview = rows[0];
   if (!interview) throw new ApiError(404, "Interview not found");
+  if (interview.user_id !== userId) throw new ApiError(403, "Forbidden");
   return interview;
 }
 

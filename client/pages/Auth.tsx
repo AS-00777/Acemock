@@ -33,7 +33,7 @@ const clerkAppearance = {
     formFieldInputContainer: "w-full overflow-visible rounded-2xl",
     formFieldInputWrapper: "w-full overflow-visible rounded-2xl",
     formFieldInput:
-      "h-12 w-full min-w-0 box-border rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm font-bold text-slate-950 shadow-sm outline-none transition-all placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/15",
+      "h-12 w-full min-w-0 box-border rounded-2xl border border-slate-200 bg-slate-50 px-4 text-base sm:text-sm font-bold text-slate-950 shadow-sm outline-none transition-all placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/15",
     formFieldInputShowPasswordButton:
       "text-slate-400 hover:text-slate-700 transition-colors",
     formFieldAction:
@@ -59,7 +59,7 @@ const clerkAppearance = {
       "text-blue-600 hover:text-blue-700 font-black transition-colors",
     otpCodeFieldInput:
       "rounded-xl border border-slate-200 bg-slate-50 text-slate-900 focus:border-blue-500 focus:ring-blue-500/15",
-    alert: "rounded-2xl border border-red-100 bg-red-50 text-red-700",
+    alert: "auth-clerk-alert rounded-2xl border border-red-100 bg-red-50 text-red-700",
     alertText: "text-sm font-semibold text-red-700",
     formFieldErrorText: "text-sm font-semibold text-red-600",
     formFieldSuccessText: "text-sm font-semibold text-emerald-600",
@@ -73,7 +73,7 @@ const clerkAppearance = {
     footerPageLogo: "hidden",
     footerPageLogoImage: "hidden",
     navbar: "hidden",
-    main: "gap-5",
+    main: "auth-clerk-main gap-5",
   },
 };
 
@@ -90,11 +90,11 @@ type AuthShellProps = {
 const AuthShell = ({ children, eyebrow, title, helper, switchText, switchHref, switchLabel }: AuthShellProps) => (
   <AuthRouteGuard>
     <Layout>
-      <section className="relative min-h-[calc(100vh-5rem)] overflow-hidden bg-slate-50/30 px-4 py-8 text-slate-900 dark:bg-neutral-950 sm:px-6 lg:px-8">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.12),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(15,23,42,0.08),transparent_32%)] dark:bg-none" />
-        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-blue-200 to-transparent dark:via-neutral-800" />
+      <section className="auth-viewport auth-page relative min-h-screen overflow-hidden bg-slate-50/30 px-4 py-8 text-slate-900 dark:bg-neutral-950 sm:px-6 lg:px-8">
+        <div className="auth-page-decoration absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.12),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(15,23,42,0.08),transparent_32%)] dark:bg-none" />
+        <div className="auth-page-decoration absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-blue-200 to-transparent dark:via-neutral-800" />
 
-        <div className="relative mx-auto grid min-h-[calc(100vh-9rem)] w-full max-w-6xl items-center gap-8 lg:grid-cols-[0.95fr_1.05fr]">
+        <div className="relative mx-auto grid min-h-full w-full max-w-6xl items-center gap-8 lg:grid-cols-[0.95fr_1.05fr]">
           <aside className="hidden lg:block">
             <div className="max-w-lg">
               <div className="mb-8 inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-slate-700 shadow-xl shadow-slate-200/60 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-200 dark:shadow-none">
@@ -159,7 +159,7 @@ const AuthShell = ({ children, eyebrow, title, helper, switchText, switchHref, s
                   {helper}
                 </p>
               </div>
-              {children}
+              <div className="auth-form-slot">{children}</div>
               {switchHref && switchText && switchLabel && (
                 <div className="mt-6 text-center text-sm font-semibold text-slate-500 dark:text-neutral-400">
                   {switchText}{" "}
@@ -185,8 +185,8 @@ const AuthRouteGuard = ({ children }: { children: ReactNode }) => {
   if (!isLoaded) {
     return (
       <Layout>
-        <section className="flex min-h-[calc(100vh-5rem)] items-center justify-center bg-slate-50 px-6 text-slate-900 dark:bg-neutral-950 dark:text-neutral-100">
-          <div className="rounded-2xl border border-slate-200 bg-white px-6 py-4 text-sm font-black uppercase tracking-widest text-slate-500 shadow-2xl shadow-slate-200/60 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300 dark:shadow-none">
+        <section className="auth-viewport flex min-h-screen items-center justify-center bg-slate-50 px-6 text-slate-900 dark:bg-neutral-950 dark:text-neutral-100">
+          <div className="w-full max-w-xs rounded-2xl border border-slate-200 bg-white px-4 py-4 text-center text-xs font-black uppercase tracking-wider text-slate-500 shadow-2xl shadow-slate-200/60 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300 dark:shadow-none sm:text-sm sm:tracking-widest">
             Loading secure sign in...
           </div>
         </section>
@@ -215,7 +215,6 @@ export const Login = () => (
       path="/login"
       signUpUrl="/signup"
       fallbackRedirectUrl={redirectUrl}
-      forceRedirectUrl={redirectUrl}
       appearance={clerkAppearance}
     />
   </AuthShell>
@@ -235,7 +234,6 @@ export const Signup = () => (
       path="/signup"
       signInUrl="/login"
       fallbackRedirectUrl={redirectUrl}
-      forceRedirectUrl={redirectUrl}
       appearance={clerkAppearance}
     />
   </AuthShell>
@@ -255,7 +253,6 @@ export const ForgotPassword = () => (
       path="/forgot-password"
       signUpUrl="/signup"
       fallbackRedirectUrl={redirectUrl}
-      forceRedirectUrl={redirectUrl}
       appearance={clerkAppearance}
     />
   </AuthShell>
@@ -275,7 +272,6 @@ export const ResetPassword = () => (
       path="/reset-password"
       signUpUrl="/signup"
       fallbackRedirectUrl={redirectUrl}
-      forceRedirectUrl={redirectUrl}
       appearance={clerkAppearance}
     />
   </AuthShell>

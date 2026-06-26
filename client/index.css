@@ -5,10 +5,20 @@
 @layer base {
   html {
     font-family: theme(fontFamily.inter);
+    max-width: 100%;
+    overflow-x: hidden;
   }
 
   body {
     @apply bg-slate-50 text-slate-900 transition-colors;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  #root {
+    width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
   }
 
   .dark body {
@@ -41,3 +51,189 @@
   }
 }
 
+/* Stable mobile viewport for auth routes. The later declarations override the
+   100vh fallback on browsers that support small/dynamic viewport units. */
+.auth-viewport {
+  min-height: 100vh;
+  min-height: 100svh;
+  min-height: 100dvh;
+}
+
+.auth-form-slot {
+  min-height: 22rem;
+}
+
+.auth-clerk-main {
+  display: flex;
+  flex-direction: column;
+}
+
+.auth-clerk-alert {
+  order: 99;
+  margin-top: 0.25rem;
+}
+
+@media (max-width: 767px) {
+  .auth-page-decoration {
+    display: none;
+  }
+
+  .auth-page *,
+  .auth-page *::before,
+  .auth-page *::after {
+    animation: none !important;
+    transition-duration: 0s !important;
+  }
+}
+
+.company-logo-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 8px;
+}
+
+.company-logo-wrap--active {
+  border-color: rgba(59, 130, 246, 0.45);
+}
+
+.company-logo-wrap--menu {
+  width: 56px;
+  height: 40px;
+}
+
+.company-logo-wrap--header {
+  width: 84px;
+  height: 64px;
+}
+
+.company-logo-wrap--overview {
+  width: 64px;
+  height: 64px;
+}
+
+.company-logo-wrap img,
+.company-logo-img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.company-logo-wrap--menu img,
+.company-logo-wrap--menu .company-logo-img {
+  max-width: 46px;
+  max-height: 28px;
+}
+
+.company-logo-wrap--header img,
+.company-logo-wrap--header .company-logo-img {
+  max-width: 70px;
+  max-height: 46px;
+}
+
+.company-logo-wrap--overview img,
+.company-logo-wrap--overview .company-logo-img {
+  max-width: 52px;
+  max-height: 40px;
+}
+
+.company-logo-fallback {
+  color: #334155;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  text-align: center;
+}
+
+.aptitude-mega-menu {
+  max-height: calc(100vh - 96px);
+  overflow-x: hidden;
+  overflow-y: hidden;
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.14) !important;
+}
+
+.aptitude-mega-shell {
+  max-height: inherit;
+  min-height: 0;
+  background: #ffffff;
+}
+
+.aptitude-mega-scroll {
+  max-height: inherit;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(37, 99, 235, 0.4) rgba(226, 232, 240, 0.9);
+}
+
+.aptitude-mega-scroll:first-child {
+  scrollbar-width: thin;
+}
+
+.aptitude-mega-scroll:last-child {
+  max-height: calc(100vh - 120px);
+  padding-right: 14px;
+}
+
+.aptitude-mega-content {
+  direction: rtl;
+}
+
+.aptitude-mega-content-inner {
+  direction: ltr;
+}
+
+.aptitude-mega-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.aptitude-mega-scroll::-webkit-scrollbar-track {
+  background: rgba(229, 231, 235, 0.7);
+  border-radius: 999px;
+}
+
+.aptitude-mega-scroll::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.45);
+  border-radius: 999px;
+}
+
+.aptitude-mega-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(37, 99, 235, 0.55);
+}
+
+.dark .aptitude-mega-menu {
+  background: #111111 !important;
+  border: 1px solid #2a2a2a !important;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.28) !important;
+}
+
+.dark .aptitude-mega-shell {
+  background: #111111;
+}
+
+.dark .aptitude-mega-scroll {
+  scrollbar-color: rgba(96, 165, 250, 0.5) rgba(31, 41, 55, 0.9);
+}
+
+.dark .aptitude-mega-scroll::-webkit-scrollbar-track {
+  background: rgba(31, 41, 55, 0.9);
+}
+
+.dark .aptitude-mega-scroll::-webkit-scrollbar-thumb {
+  background: rgba(96, 165, 250, 0.5);
+}
+
+.dark .aptitude-mega-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(147, 197, 253, 0.65);
+}

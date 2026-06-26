@@ -39,6 +39,7 @@ const SKILL_RULES: SkillRule[] = [
   { matches: /typescript|\bts\b/i, language: "TypeScript", evaluationType: "function", template: "javascript" },
   { matches: /javascript|\bjs\b/i, language: "JavaScript", evaluationType: "function", template: "javascript" },
   { matches: /^python(?:\s+programming)?$/i, language: "Python", evaluationType: "function", template: "python" },
+  { matches: /pandas|numpy|scikit|sklearn|machine learning|^ml$/i, language: "Python", evaluationType: "function", template: "python" },
   { matches: /\bjava\b/i, language: "Java", evaluationType: "function", template: "java" },
   { matches: /node|express|nest/i, language: "JavaScript", evaluationType: "function", template: "node" },
   { matches: /c\+\+/i, language: "C++", evaluationType: "function", template: "cpp" },
@@ -97,6 +98,18 @@ const CODING_TEMPLATES = {
 } as const;
 
 const NON_CODING_FALLBACKS: Record<string, string[]> = {
+  "Data Science": [
+    "How do you decide between dropping, imputing, or explicitly modeling missing values in a dataset?",
+    "Explain overfitting and underfitting, and describe how you would recognize each during model development.",
+    "When would you choose logistic regression instead of a decision tree for a classification problem?",
+    "How would you evaluate a classification model when the positive class is rare?",
+    "A model performs well offline but poorly after deployment. What data and modeling issues would you investigate?",
+    "How do you detect and prevent data leakage before training a model?",
+    "Explain how you would validate whether a new feature genuinely improves a model.",
+    "When is cross-validation more useful than a single train-validation split?",
+    "How would you handle strongly correlated input features, and when does that correlation matter?",
+    "Walk through the checks you perform before trusting a dataset for model training.",
+  ],
   "Product Management": [
     "A key activation metric drops 15% after a release. How would you investigate and prioritize the response?",
     "Two customer segments request conflicting features. How would you decide what enters the next quarter's roadmap?",
@@ -193,7 +206,10 @@ const CODING_QUESTION_VARIANTS: Record<keyof typeof CODING_TEMPLATES, string[]> 
 };
 
 export function domainNeedsCoding(role: string) {
-  return Boolean(INTERVIEW_DOMAIN_CONFIG[role as InterviewDomain]?.codingRound);
+  const configured = INTERVIEW_DOMAIN_CONFIG[role as InterviewDomain];
+  if (configured) return Boolean(configured.codingRound);
+  if (/ui\s*\/\s*ux|ux\s*\/\s*ui|design|human resources|^hr$/i.test(role)) return false;
+  return /frontend|front-end|backend|back-end|full stack|full-stack|software (?:developer|engineer)|programmer/i.test(role);
 }
 
 export function getNonCodingFocus(role: string) {

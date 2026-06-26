@@ -1,7 +1,9 @@
 import { Response, NextFunction } from "express";
 import fs from "fs";
 import { AuthRequest } from "../types/request";
+import { env } from "../config/env";
 import { ApiError } from "../middleware/error.middleware";
+import { checkAndAwardBadges, recordDailyActivity } from "../services/badge.service";
 import {
   addOrGenerateQuestion,
   canRunCodeLanguage,
@@ -9,9 +11,11 @@ import {
   deleteInterview,
   getInterviewDetails,
   getInterviewHistory,
+  generateFollowUpQuestion,
   runCodeForQuestion,
   saveAudioAnswerUpload,
   saveAnswerWithEvaluation,
+  saveFollowUpAnswer,
   startInterview,
 } from "../services/interview.service";
 
@@ -39,6 +43,10 @@ export const start = async (
             : rawDifficulty === "Hard"
               ? "hard"
               : undefined;
+    const allowedPersonalities = ["Friendly HR", "Strict Technical Lead", "Senior Engineering Manager"] as const;
+    const personality = allowedPersonalities.includes(req.body?.personality)
+      ? req.body.personality
+      : "Senior Engineering Manager";
 
     if (!role) throw new ApiError(400, "role is required");
     if (!experience) throw new ApiError(400, "experience is required");
@@ -49,6 +57,7 @@ export const start = async (
       experience,
       difficulty,
       techStack,
+      personality,
     });
 
     console.info("[interview] start", { userId: req.user.id, interviewId: interview.id, role });
@@ -59,6 +68,7 @@ export const start = async (
         userId: interview.user_id,
         role: interview.role,
         experience: interview.experience,
+        personality: (interview as any).personality ?? personality,
         difficulty: (interview as any).difficulty ?? difficulty ?? null,
         techStack: interview.tech_stack,
         status: interview.status,
@@ -241,6 +251,7 @@ export const answer = async (
       testCases,
       questionId,
       questionText: questionText ?? question,
+      timeTakenSeconds: Number.isFinite(Number(req.body?.timeTakenSeconds)) ? Math.max(0, Math.floor(Number(req.body.timeTakenSeconds))) : undefined,
     });
 
     console.info("[interview] answer", {
@@ -286,6 +297,30 @@ export const answer = async (
   } catch (err) {
     next(err);
   }
+};
+
+export const followUp = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) throw new ApiError(401, "Unauthorized");
+    const interviewId = Number(req.params.id);
+    const questionId = Number(req.body?.questionId);
+    const answerId = Number(req.body?.answerId);
+    if (![interviewId, questionId, answerId].every((value) => Number.isFinite(value) && value > 0)) throw new ApiError(400, "Valid interview, question, and answer ids are required");
+    const decision = await generateFollowUpQuestion({ interviewId, userId: req.user.id, questionId, answerId, timerExpired: req.body?.timerExpired === true });
+    res.json(decision);
+  } catch (err) { next(err); }
+};
+
+export const followUpAnswer = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) throw new ApiError(401, "Unauthorized");
+    const interviewId = Number(req.params.id);
+    const answerId = Number(req.body?.answerId);
+    const value = String(req.body?.followUpAnswer ?? "").trim();
+    if (!Number.isFinite(interviewId) || !Number.isFinite(answerId) || !value) throw new ApiError(400, "answerId and followUpAnswer are required");
+    const saved = await saveFollowUpAnswer({ interviewId, userId: req.user.id, answerId, followUpAnswer: value, timeTakenSeconds: Number.isFinite(Number(req.body?.timeTakenSeconds)) ? Math.max(0, Math.floor(Number(req.body.timeTakenSeconds))) : undefined });
+    res.json(saved);
+  } catch (err) { next(err); }
 };
 
 export const audioAnswer = async (
@@ -442,12 +477,35 @@ export const complete = async (
       overallScore: result.overall_score,
     });
 
+    try {
+      const badgeUserId = req.user.clerkId ?? String(req.user.id);
+      await recordDailyActivity(badgeUserId, "interview", {
+        sourceType: "interview",
+        sourceId: interviewId,
+        activityDate: result.created_at,
+      });
+      if (env.NODE_ENV === "development") console.log("Daily activity recorded");
+      await checkAndAwardBadges(badgeUserId);
+      if (env.NODE_ENV === "development") console.log("Badges checked");
+    } catch (badgeError: any) {
+      if (env.NODE_ENV === "development") {
+        console.warn("[badge] interview completion sync skipped", {
+          userId: req.user.id,
+          interviewId,
+          message: String(badgeError?.message ?? badgeError),
+        });
+      }
+    }
+
     res.status(201).json({
       result: {
         id: result.id,
         interviewId: result.interview_id,
         overallScore: result.overall_score,
         summary: result.summary,
+        questionWiseResults: (() => { try { return typeof (result as any).question_wise_results === "string" ? JSON.parse((result as any).question_wise_results) : (result as any).question_wise_results ?? []; } catch { return []; } })(),
+        overallFeedback: result.summary,
+        recommendedFocusAreas: (() => { try { return typeof (result as any).recommended_focus_areas === "string" ? JSON.parse((result as any).recommended_focus_areas) : (result as any).recommended_focus_areas ?? []; } catch { return []; } })(),
         createdAt: result.created_at,
       },
     });
@@ -455,6 +513,10 @@ export const complete = async (
     next(err);
   }
 };
+
+// Re-runs the same authoritative batch evaluation for a completed interview.
+// completeInterview is idempotent: it updates the existing result row.
+export const retryEvaluation = complete;
 
 export const history = async (
   req: AuthRequest,

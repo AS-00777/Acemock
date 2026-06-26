@@ -5,10 +5,14 @@ import { exec, query } from "../config/db";
 import { ApiError } from "../middleware/error.middleware";
 import {
   evaluateInterviewBatch,
+  buildQuestionSpecificRubric,
   generateInterviewQuestionsBatch,
+  generateFollowUpQuestion as generateFollowUpWithAi,
+  isEmptyInterviewAnswer,
   runCodingTestCases,
   type CodingTestCase,
   type InterviewBatchAnswerInput,
+  type InterviewerPersonality,
 } from "./gemini.service";
 import { assertUserCanStartInterview } from "./ban.service";
 import { transcribeAudioFile } from "./transcription.service";
@@ -34,10 +38,12 @@ type InterviewRow = RowDataPacket & {
   user_id: number;
   role: string;
   experience: string;
+  personality: InterviewerPersonality;
   difficulty: Difficulty | null;
   tech_stack: any;
   status: "IN_PROGRESS" | "COMPLETED";
   warning_count: number;
+  follow_up_count: number;
   created_at: Date;
   completed_at: Date | null;
 };
@@ -78,6 +84,12 @@ type AnswerRow = RowDataPacket & {
   transcript: string | null;
   raw_transcript: string | null;
   corrected_transcript: string | null;
+  follow_up_question: string | null;
+  follow_up_answer: string | null;
+  follow_up_reason: string | null;
+  interviewer_reaction: string | null;
+  time_taken_seconds: number | null;
+  follow_up_time_taken_seconds: number | null;
   nlp_score: number | null;
   answer_length: number | null;
   nlp_missing_concepts: any;
@@ -129,6 +141,8 @@ type ResultRow = RowDataPacket & {
   interview_id: number;
   overall_score: number;
   summary: string;
+  question_wise_results: any;
+  recommended_focus_areas: any;
   created_at: Date;
 };
 
@@ -148,6 +162,9 @@ type QuestionAnswerRow = RowDataPacket & {
   language: string | null;
   transcript: string | null;
   corrected_transcript: string | null;
+  follow_up_question: string | null;
+  follow_up_answer: string | null;
+  time_taken_seconds: number | null;
 };
 
 let answerColumnsCache: Set<string> | null = null;
@@ -191,6 +208,10 @@ function parseStringArrayMaybe(value: unknown): string[] {
   const parsed = parseJsonMaybe(value);
   if (!Array.isArray(parsed)) return [];
   return parsed.map((item) => String(item ?? "").trim()).filter(Boolean);
+}
+
+function hasGenericExpectedAnswer(value: unknown) {
+  return /show accurate .* knowledge|accurately explain the core .* concepts|demonstrate correct .* logic/i.test(String(value ?? ""));
 }
 
 function isDifficulty(v: unknown): v is Difficulty {
@@ -255,8 +276,8 @@ function normalizeQuestionsForSave(
       return {
         ...question,
         question: fallback.question,
-        expectedAnswer: `A strong answer should demonstrate correct ${fixedSkill} logic, edge-case handling, and clear complexity reasoning.`,
-        keyConcepts: [fixedSkill, "Correctness", "Edge cases", "Complexity", "Code quality"],
+        expectedAnswer: `A strong answer should implement the exact behavior requested in “${fallback.question}” and demonstrate why the algorithm is correct. It should cover input validation, edge cases, time and space complexity, and tests that verify the required output.`,
+        keyConcepts: ["Correctness", "Input validation", "Edge cases", "Time complexity", "Space complexity", "Test coverage"],
         topic: fixedSkill,
         skill: fixedSkill,
         language: fallback.language,
@@ -291,6 +312,9 @@ function normalizeQuestionsForSave(
   }).map((question) => {
     if (question.questionType === "mcq" && (question.options?.length !== 4 || !question.correctOption || !question.explanation)) {
       throw new ApiError(500, "Generated MCQ metadata is incomplete");
+    }
+    if (question.questionType === "practical" && ((question.constraints?.length ?? 0) < 2 || !question.expectedOutput || !/\b(write|implement|build|create|code|coding|algorithm|query|data-processing|component|function|logic)\b/i.test(question.question))) {
+      return { ...question, questionType: "theory" as const, constraints: undefined, expectedOutput: undefined, evaluationType: undefined };
     }
     if (question.questionType !== "coding") return question;
     const skill = String(question.skill ?? question.topic ?? "").trim();
@@ -377,11 +401,12 @@ function inferQuestionTypeFromText(text: string): QuestionType {
 
 async function getInterviewOrThrow(interviewId: number, userId: number): Promise<InterviewRow> {
   const rows = await query<InterviewRow[]>(
-    "SELECT * FROM interviews WHERE id = ? AND user_id = ? LIMIT 1",
-    [interviewId, userId]
+    "SELECT * FROM interviews WHERE id = ? LIMIT 1",
+    [interviewId]
   );
   const interview = rows[0];
   if (!interview) throw new ApiError(404, "Interview not found");
+  if (interview.user_id !== userId) throw new ApiError(403, "Forbidden");
   interview.tech_stack = parseJsonMaybe(interview.tech_stack);
   return interview;
 }
@@ -392,6 +417,7 @@ export async function startInterview(params: {
   experience: string;
   difficulty?: Difficulty;
   techStack: unknown;
+  personality?: InterviewerPersonality;
 }) {
   const selectedSkills = Object.freeze([...selectedSkillsFromTechStack(params.techStack)]);
   if (!selectedSkills.length) {
@@ -401,6 +427,7 @@ export async function startInterview(params: {
   const domain = params.role.trim();
   const experience = params.experience.trim();
   const questionCount = 10;
+  const personality = params.personality ?? "Senior Engineering Manager";
   const incomingTechStack = params.techStack && typeof params.techStack === "object" && !Array.isArray(params.techStack)
     ? params.techStack as Record<string, unknown>
     : {};
@@ -414,11 +441,12 @@ export async function startInterview(params: {
   await assertUserCanStartInterview(params.userId);
 
   const result = await exec(
-    "INSERT INTO interviews (user_id, role, experience, difficulty, tech_stack, status, created_at) VALUES (?, ?, ?, ?, ?, 'IN_PROGRESS', NOW())",
+    "INSERT INTO interviews (user_id, role, experience, personality, difficulty, tech_stack, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'IN_PROGRESS', NOW())",
     [
       params.userId,
       requestSnapshot.domain,
       requestSnapshot.experience,
+      personality,
       requestSnapshot.difficulty,
       JSON.stringify(requestSnapshot.techStack),
     ]
@@ -437,6 +465,7 @@ export async function startInterview(params: {
     techStack: requestSnapshot.techStack,
     selectedSkills: requestSnapshot.selectedSkills,
     count: requestSnapshot.questionCount,
+    personality,
   });
   const questionsToSave = normalizeQuestionsForSave(
     requestSnapshot.domain,
@@ -461,7 +490,7 @@ export async function startInterview(params: {
         question.questionType === "coding" ? JSON.stringify(question.testCases ?? []) : null,
         question.questionType === "coding" ? JSON.stringify(question.hiddenTestCases ?? []) : null,
         question.constraints?.length ? JSON.stringify(question.constraints) : null,
-        question.questionType === "coding" ? question.expectedOutput ?? null : null,
+        question.questionType === "coding" || question.questionType === "practical" ? question.expectedOutput ?? null : null,
         question.questionType === "coding" ? question.evaluationType ?? null : null,
         question.questionType === "mcq" ? JSON.stringify(question.options ?? []) : null,
         question.questionType === "mcq" ? question.correctOption ?? null : null,
@@ -504,6 +533,7 @@ export async function saveAnswerWithEvaluation(params: {
   testCases?: any;
   questionId?: number;
   questionText?: string;
+  timeTakenSeconds?: number;
 }) {
   const interview = await getInterviewOrThrow(params.interviewId, params.userId);
   if (interview.status === "COMPLETED") throw new ApiError(400, "Interview already completed");
@@ -557,6 +587,7 @@ export async function saveAnswerWithEvaluation(params: {
     strengths: null,
     weaknesses: null,
     suggestions: null,
+    time_taken_seconds: params.timeTakenSeconds ?? null,
   };
   const insertEntries = Object.entries(insertFields).filter(([column]) => answerColumns.has(column));
   const insAnswer = await exec(
@@ -575,6 +606,87 @@ export async function saveAnswerWithEvaluation(params: {
       ? { score: mcqScore, rating: isMcqCorrect ? "Excellent" : "Poor", feedback: mcqFeedback, correct: isMcqCorrect }
       : null,
   };
+}
+
+function answerMayNeedFollowUp(answer: string) {
+  const normalized = answer.trim().toLowerCase();
+  if (/^(i\s*(do not|don't)\s*know|not sure|no idea|unsure)\b/.test(normalized)) return true;
+  const words = normalized.split(/\s+/).filter(Boolean);
+  return words.length < 45 || /\b(maybe|probably|something|stuff|it depends)\b/.test(normalized);
+}
+
+export async function generateFollowUpQuestion(params: {
+  interviewId: number;
+  userId: number;
+  questionId: number;
+  answerId: number;
+  timerExpired?: boolean;
+}) {
+  const interview = await getInterviewOrThrow(params.interviewId, params.userId);
+  if (interview.status === "COMPLETED" || params.timerExpired) {
+    return { followUpNeeded: false, reason: "The interview timer has expired.", interviewerReaction: "Thank you. Let's move on.", followUpQuestion: null };
+  }
+  if ((interview.follow_up_count ?? 0) >= 3) {
+    return { followUpNeeded: false, reason: "The session follow-up limit was reached.", interviewerReaction: "Thank you. Let's move to the next question.", followUpQuestion: null };
+  }
+  const rows = await query<(QuestionRow & AnswerRow)[]>(
+    `SELECT q.*, a.id AS id, a.answer_text, a.transcript, a.corrected_transcript, a.follow_up_question
+     FROM questions q JOIN answers a ON a.question_id = q.id
+     WHERE q.id = ? AND a.id = ? AND q.interview_id = ? LIMIT 1`,
+    [params.questionId, params.answerId, interview.id]
+  );
+  const row: any = rows[0];
+  if (!row) throw new ApiError(404, "Answer not found");
+  if (!(["theory", "scenario"] as string[]).includes(row.question_type) || row.follow_up_question) {
+    return { followUpNeeded: false, reason: "This question is not eligible for another follow-up.", interviewerReaction: "Thank you. Let's move to the next question.", followUpQuestion: null };
+  }
+  const candidateAnswer = String(row.corrected_transcript || row.transcript || row.answer_text || "").trim();
+  if (!answerMayNeedFollowUp(candidateAnswer)) {
+    return { followUpNeeded: false, reason: "The answer is sufficiently detailed.", interviewerReaction: "Good explanation. Let's move to the next topic.", followUpQuestion: null };
+  }
+  const decision = await generateFollowUpWithAi({
+    question: row.question_text,
+    answer: candidateAnswer,
+    role: interview.role,
+    techStack: interview.tech_stack,
+    difficulty: row.difficulty && isDifficulty(row.difficulty) ? row.difficulty : getInterviewDifficulty(interview),
+    interviewType: row.question_type,
+    personality: interview.personality || "Senior Engineering Manager",
+    expectedAnswer: row.expected_answer,
+    keyConcepts: parseStringArrayMaybe(row.key_concepts),
+  });
+  if (decision.followUpNeeded && decision.followUpQuestion) {
+    const updated = await exec(
+      `UPDATE answers a JOIN questions q ON q.id = a.question_id
+       JOIN interviews i ON i.id = q.interview_id
+       SET a.follow_up_question = ?, a.follow_up_reason = ?, a.interviewer_reaction = ?, i.follow_up_count = i.follow_up_count + 1
+       WHERE a.id = ? AND i.id = ? AND a.follow_up_question IS NULL AND i.follow_up_count < 3`,
+      [decision.followUpQuestion, decision.reason, decision.interviewerReaction, params.answerId, interview.id]
+    );
+    if (!updated.affectedRows) return { followUpNeeded: false, reason: "Follow-up limit reached.", interviewerReaction: "Thank you. Let's move on.", followUpQuestion: null };
+  } else {
+    await updateAnswerFields(params.answerId, { interviewer_reaction: decision.interviewerReaction, follow_up_reason: decision.reason });
+  }
+  return decision;
+}
+
+export async function saveFollowUpAnswer(params: {
+  interviewId: number;
+  userId: number;
+  answerId: number;
+  followUpAnswer: string;
+  timeTakenSeconds?: number;
+}) {
+  const interview = await getInterviewOrThrow(params.interviewId, params.userId);
+  if (interview.status === "COMPLETED") throw new ApiError(400, "Interview already completed");
+  const result = await exec(
+    `UPDATE answers a JOIN questions q ON q.id = a.question_id
+     SET a.follow_up_answer = ?, a.follow_up_time_taken_seconds = ?
+     WHERE a.id = ? AND q.interview_id = ? AND a.follow_up_question IS NOT NULL`,
+    [params.followUpAnswer.trim(), params.timeTakenSeconds ?? null, params.answerId, interview.id]
+  );
+  if (!result.affectedRows) throw new ApiError(404, "Follow-up question not found");
+  return { saved: true };
 }
 
 export async function saveAudioAnswerUpload(params: {
@@ -817,6 +929,9 @@ export async function completeInterview(params: {
        a.answer_text,
        a.code,
        a.language,
+       a.follow_up_question,
+       a.follow_up_answer,
+       a.time_taken_seconds,
        ${transcriptSelect},
        ${correctedTranscriptSelect}
      FROM questions q
@@ -826,11 +941,26 @@ export async function completeInterview(params: {
     [interview.id]
   );
 
+  for (const row of qaRows) {
+    const expected = String(row.expected_answer ?? "");
+    if (hasGenericExpectedAnswer(expected)) {
+      const rubric = buildQuestionSpecificRubric(row.question_text, interview.role);
+      row.expected_answer = rubric.expectedAnswer;
+      row.key_concepts = rubric.expectedConcepts;
+      await exec("UPDATE questions SET expected_answer = ?, key_concepts = ? WHERE id = ? AND interview_id = ?", [
+        rubric.expectedAnswer,
+        JSON.stringify(rubric.expectedConcepts),
+        row.question_id,
+        interview.id,
+      ]);
+    }
+  }
+
   const defaultDifficulty = getInterviewDifficulty(interview);
   const answersToEvaluate: InterviewBatchAnswerInput[] = qaRows
     .filter((row): row is QuestionAnswerRow & { answer_id: number } => typeof row.answer_id === "number" && row.question_type !== "mcq")
     .map((row) => {
-      const questionType = row.question_type === "coding" ? "coding" : "theory";
+      const questionType = row.question_type === "coding" || (row.question_type === "practical" && Boolean(row.code || row.language)) ? "coding" : "theory";
       const answerText = row.corrected_transcript?.trim() || row.transcript?.trim() || row.answer_text || "";
       const hiddenTestCases = questionType === "coding" ? normalizeVisibleTestCases(row.hidden_test_cases) : [];
       const hiddenCorrectness = questionType === "coding"
@@ -847,6 +977,8 @@ export async function completeInterview(params: {
         expectedAnswer: row.expected_answer,
         keyConcepts: parseStringArrayMaybe(row.key_concepts),
         userAnswer: questionType === "coding" && row.code ? row.code : answerText,
+        followUpQuestion: row.follow_up_question,
+        followUpAnswer: row.follow_up_answer,
         code: row.code,
         explanation: answerText,
         hiddenTestCases,
@@ -860,6 +992,22 @@ export async function completeInterview(params: {
     });
 
   for (const answer of answersToEvaluate) {
+    if (isEmptyInterviewAnswer(answer.userAnswer)) {
+      await updateAnswerFields(answer.answerId, {
+        nlp_score: 0,
+        answer_length: 0,
+        nlp_missing_concepts: JSON.stringify(answer.keyConcepts ?? []),
+        filler_words_count: 0,
+        fluency_score: 0,
+        clarity_score: 0,
+        nlp_summary: "No answer was provided.",
+        confidence_score: 0,
+        confidence_level: "Low",
+        confidence_reasons: JSON.stringify(["No answer was provided."]),
+        confidence_tips: JSON.stringify(["Attempt the question and explain your reasoning clearly."]),
+      });
+      continue;
+    }
     try {
       const nlp = analyzeAnswerNlp({
         question: answer.question,
@@ -907,6 +1055,7 @@ export async function completeInterview(params: {
     experience: interview.experience,
     techStack: interview.tech_stack,
     answers: answersToEvaluate,
+    personality: interview.personality,
   });
 
   for (const evaluation of batchEvaluation.evaluations) {
@@ -914,6 +1063,8 @@ export async function completeInterview(params: {
       score: evaluation.score,
       ai_score: evaluation.aiScore,
       final_score: evaluation.finalScore,
+      main_answer_score: evaluation.mainAnswerScore,
+      follow_up_score: evaluation.followUpScore,
       feedback: evaluation.feedback,
       strengths: evaluation.strengths,
       weaknesses: evaluation.weaknesses,
@@ -934,6 +1085,16 @@ export async function completeInterview(params: {
     ? Math.max(0, Math.min(100, Math.round(scores100.reduce((sum, score) => sum + score, 0) / scores100.length)))
     : 0;
   const summary = params.summary?.trim() || batchEvaluation.summary || "No answers recorded.";
+  const questionWiseResults = batchEvaluation.evaluations.map((evaluation) => ({
+    questionId: String(evaluation.questionId),
+    score: evaluation.finalScore,
+    mainAnswerScore: evaluation.mainAnswerScore,
+    followUpScore: evaluation.followUpScore,
+    strengths: evaluation.strengths ? [evaluation.strengths] : [],
+    weaknesses: evaluation.weaknesses ? [evaluation.weaknesses] : [],
+    improvementSuggestion: evaluation.suggestions,
+  }));
+  const recommendedFocusAreas = Array.from(new Set(batchEvaluation.evaluations.flatMap((item) => item.missingConcepts))).slice(0, 8);
 
   const existing = await query<(RowDataPacket & { id: number })[]>(
     "SELECT id FROM results WHERE interview_id = ? LIMIT 1",
@@ -941,15 +1102,17 @@ export async function completeInterview(params: {
   );
 
   if (existing.length) {
-    await exec("UPDATE results SET overall_score = ?, summary = ? WHERE interview_id = ?", [
+    await exec("UPDATE results SET overall_score = ?, summary = ?, question_wise_results = ?, recommended_focus_areas = ? WHERE interview_id = ?", [
       overallScore,
       summary,
+      JSON.stringify(questionWiseResults),
+      JSON.stringify(recommendedFocusAreas),
       interview.id,
     ]);
   } else {
     await exec(
-      "INSERT INTO results (interview_id, overall_score, summary, created_at) VALUES (?, ?, ?, NOW())",
-      [interview.id, overallScore, summary]
+      "INSERT INTO results (interview_id, overall_score, summary, question_wise_results, recommended_focus_areas, created_at) VALUES (?, ?, ?, ?, ?, NOW())",
+      [interview.id, overallScore, summary, JSON.stringify(questionWiseResults), JSON.stringify(recommendedFocusAreas)]
     );
   }
 
@@ -1052,6 +1215,8 @@ export async function getInterviewDetails(params: { interviewId: number; userId:
     userId: interview.user_id,
     role: interview.role,
     experience: interview.experience,
+    personality: interview.personality,
+    followUpCount: interview.follow_up_count,
     difficulty: interview.difficulty ?? null,
     techStack: interview.tech_stack,
     status: interview.status,
@@ -1061,8 +1226,8 @@ export async function getInterviewDetails(params: { interviewId: number; userId:
         id: q.id,
         interviewId: q.interview_id,
         questionText: q.question_text,
-      expectedAnswer: q.expected_answer,
-      keyConcepts: parseStringArrayMaybe(q.key_concepts),
+      expectedAnswer: hasGenericExpectedAnswer(q.expected_answer) ? buildQuestionSpecificRubric(q.question_text, q.skill || interview.role).expectedAnswer : q.expected_answer,
+      keyConcepts: hasGenericExpectedAnswer(q.expected_answer) ? buildQuestionSpecificRubric(q.question_text, q.skill || interview.role).expectedConcepts : parseStringArrayMaybe(q.key_concepts),
       testCases: normalizeVisibleTestCases(q.test_cases),
       difficulty: q.difficulty,
       topic: q.topic,
@@ -1082,6 +1247,12 @@ export async function getInterviewDetails(params: { interviewId: number; userId:
         id: a.id,
         questionId: a.question_id,
         answerText: a.answer_text,
+        followUpQuestion: a.follow_up_question,
+        followUpAnswer: a.follow_up_answer,
+        followUpReason: a.follow_up_reason,
+        interviewerReaction: a.interviewer_reaction,
+        timeTakenSeconds: a.time_taken_seconds,
+        followUpTimeTakenSeconds: a.follow_up_time_taken_seconds,
         code: a.code,
         language: a.language,
         audioFilePath: a.audio_file_path,

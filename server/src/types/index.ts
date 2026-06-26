@@ -2,6 +2,7 @@ export type AuthedUser = {
   id: number;
   email: string;
   name: string;
+  clerkId?: string;
 };
 
 declare global {

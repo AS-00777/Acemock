@@ -1,12 +1,5 @@
-import React, { useMemo } from "react";
-import CodeMirror from "@uiw/react-codemirror";
-import { javascript } from "@codemirror/lang-javascript";
-import { python } from "@codemirror/lang-python";
-import { java } from "@codemirror/lang-java";
-import { cpp } from "@codemirror/lang-cpp";
-import { indentUnit } from "@codemirror/language";
-import { oneDark } from "@codemirror/theme-one-dark";
-import type { Extension } from "@codemirror/state";
+import React from "react";
+import Editor from "@monaco-editor/react";
 
 type CodingEditorProps = {
   value: string;
@@ -16,43 +9,37 @@ type CodingEditorProps = {
   onFocus?: () => void;
 };
 
-function languageExtension(language: string): Extension {
-  switch (language.trim().toLowerCase()) {
-    case "javascript": return javascript();
-    case "typescript": return javascript({ typescript: true });
-    case "python": return python();
-    case "java": return java();
-    case "c":
-    case "c++":
-    case "cpp": return cpp();
-    default: return [];
-  }
+function monacoLanguage(language: string) {
+  const normalized = language.trim().toLowerCase();
+  if (normalized === "typescript" || normalized === "ts") return "typescript";
+  if (normalized === "javascript" || normalized === "js" || normalized === "node.js") return "javascript";
+  if (normalized === "python" || normalized === "pandas" || normalized === "numpy") return "python";
+  if (normalized === "c++" || normalized === "cpp") return "cpp";
+  if (normalized === "c") return "c";
+  if (normalized === "sql" || normalized.includes("mysql") || normalized.includes("postgres")) return "sql";
+  if (normalized === "html" || normalized === "css" || normalized === "java") return normalized;
+  return "plaintext";
 }
 
 export default function CodingEditor({ value, language, dark, onChange, onFocus }: CodingEditorProps) {
-  const extensions = useMemo(() => [languageExtension(language), indentUnit.of("  ")], [language]);
-
   return (
-    <div
-      onFocusCapture={onFocus}
-      className="h-80 overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-neutral-700 dark:bg-[#1e1e1e] [&_.cm-editor]:h-80 [&_.cm-editor]:text-sm [&_.cm-scroller]:font-mono [&_.cm-scroller]:overflow-auto"
-    >
-      <CodeMirror
-        value={value}
+    <div onFocusCapture={onFocus} className="h-80 overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-neutral-700 dark:bg-[#1e1e1e]">
+      <Editor
         height="320px"
-        theme={dark ? oneDark : "light"}
-        extensions={extensions}
-        onChange={onChange}
-        basicSetup={{
-          autocompletion: true,
-          bracketMatching: true,
-          closeBrackets: true,
-          foldGutter: true,
-          highlightActiveLine: true,
-          highlightActiveLineGutter: true,
-          highlightSelectionMatches: true,
-          indentOnInput: true,
-          lineNumbers: true,
+        language={monacoLanguage(language)}
+        value={value}
+        theme={dark ? "vs-dark" : "light"}
+        onChange={(nextValue) => onChange(nextValue ?? "")}
+        options={{
+          automaticLayout: true,
+          minimap: { enabled: false },
+          fontSize: 14,
+          tabSize: 2,
+          wordWrap: "on",
+          scrollBeyondLastLine: false,
+          suggestOnTriggerCharacters: true,
+          quickSuggestions: true,
+          bracketPairColorization: { enabled: true },
         }}
       />
     </div>

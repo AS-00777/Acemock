@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { DotLottieReact, setWasmUrl } from "@lottiefiles/dotlottie-react";
 import loadingAnimation from "../assets/Loading.lottie";
 
@@ -9,17 +9,10 @@ type AppLoadingScreenProps = {
 };
 
 const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ isExiting = false }) => {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => setMounted(true));
-    return () => window.cancelAnimationFrame(frame);
-  }, []);
-
   return (
     <div
-      className={`min-h-screen bg-slate-50 dark:bg-neutral-950 flex items-center justify-center px-6 transition-opacity duration-300 ease-out ${
-        mounted && !isExiting ? "opacity-100" : "opacity-0"
+      className={`auth-viewport min-h-screen bg-slate-50 dark:bg-neutral-950 flex items-center justify-center px-6 transition-opacity duration-200 ease-out ${
+        !isExiting ? "opacity-100" : "opacity-0"
       }`}
       role="status"
       aria-live="polite"

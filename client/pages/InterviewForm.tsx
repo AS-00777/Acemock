@@ -13,7 +13,8 @@ const InterviewForm: React.FC = () => {
     domain: DOMAINS[0],
     experience: 1,
     skills: '',
-    difficulty: DIFFICULTIES[1]
+    difficulty: DIFFICULTIES[1],
+    personality: 'Senior Engineering Manager'
   });
   const navigate = useNavigate();
   const { logout } = useAuth();
@@ -42,6 +43,7 @@ const InterviewForm: React.FC = () => {
         experience: formData.experience,
         difficulty: String(formData.difficulty).trim(),
         skills: formData.skills.split(',').map(s => s.trim()).filter(Boolean),
+        personality: formData.personality,
       };
       if (!requestSnapshot.domain) {
         throw new Error("Please select an interview domain.");
@@ -59,6 +61,7 @@ const InterviewForm: React.FC = () => {
         experience: String(requestSnapshot.experience),
         difficulty: requestSnapshot.difficulty,
         techStack: { skills: [...skillsArray], difficulty: requestSnapshot.difficulty, domain: requestSnapshot.domain },
+        personality: requestSnapshot.personality,
       });
       const newId = resp?.interviewId ?? resp?.interview?.id;
       if (!newId) throw new Error("Failed to start interview.");
@@ -78,13 +81,13 @@ const InterviewForm: React.FC = () => {
 
   return (
     <Layout>
-      <div className="max-w-4xl mx-auto px-4 py-16 bg-gray-50/30 dark:bg-neutral-950 transition-colors duration-200">
-        <div className="bg-white dark:bg-neutral-900 rounded-[3rem] border border-gray-100 dark:border-neutral-800 shadow-[0_30px_70px_-20px_rgba(0,0,0,0.1)] p-10 md:p-16 relative overflow-hidden transition-colors">
+      <div className="w-full min-w-0 max-w-4xl mx-auto px-3 sm:px-4 py-8 sm:py-12 lg:py-16 bg-gray-50/30 dark:bg-neutral-950 transition-colors duration-200 overflow-x-hidden">
+        <div className="min-w-0 bg-white dark:bg-neutral-900 rounded-[2rem] sm:rounded-[3rem] border border-gray-100 dark:border-neutral-800 shadow-[0_30px_70px_-20px_rgba(0,0,0,0.1)] p-5 sm:p-10 md:p-16 relative overflow-hidden transition-colors">
           <div className="absolute top-0 right-0 w-48 h-48 bg-blue-50/50 dark:bg-neutral-950 rounded-bl-[10rem] opacity-70 -z-0"></div>
           
-          <div className="relative z-10 text-center mb-12">
-            <h1 className="text-4xl font-extrabold text-gray-900 dark:text-neutral-100 mb-3">Customize Your Mock</h1>
-            <p className="text-gray-500 dark:text-neutral-400 text-xl font-medium">Configure your experience and let Gemini AI build your session.</p>
+          <div className="relative z-10 text-center mb-8 sm:mb-12">
+            <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-neutral-100 mb-3 break-words">Customize Your Mock</h1>
+            <p className="text-gray-500 dark:text-neutral-400 text-base sm:text-xl font-medium">Configure your experience and let Gemini AI build your session.</p>
           </div>
 
           {error && (
@@ -100,7 +103,7 @@ const InterviewForm: React.FC = () => {
           )}
           
           <form onSubmit={handleSubmit} className="space-y-10 relative z-10">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+            <div className="grid min-w-0 grid-cols-1 md:grid-cols-2 gap-6 md:gap-10">
               <div className="space-y-3">
                 <label className={labelClass}>Target Domain</label>
                 <select 
@@ -158,6 +161,21 @@ const InterviewForm: React.FC = () => {
                   </button>
                 ))}
               </div>
+            </div>
+
+            <div className="space-y-3">
+              <label className={labelClass}>Interviewer Personality</label>
+              <select
+                className={inputClass + " appearance-none cursor-pointer"}
+                value={formData.personality}
+                disabled={loading}
+                onChange={e => setFormData({...formData, personality: e.target.value})}
+              >
+                {['Friendly HR', 'Strict Technical Lead', 'Senior Engineering Manager'].map(personality => (
+                  <option key={personality} value={personality} className="bg-white dark:bg-neutral-900">{personality}</option>
+                ))}
+              </select>
+              <p className="px-1 text-sm font-medium text-gray-500 dark:text-neutral-400">Professional and constructive in every mode.</p>
             </div>
 
             <button 

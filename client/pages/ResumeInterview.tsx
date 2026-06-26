@@ -102,21 +102,21 @@ const ResumeInterview: React.FC = () => {
 
   return (
     <Layout>
-      <div className="max-w-4xl mx-auto px-4 py-16 transition-colors duration-200">
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-black text-slate-900 dark:text-neutral-100 mb-4 font-poppins">Interview by Resume</h1>
-          <p className="text-slate-500 dark:text-neutral-400 text-lg font-medium max-w-xl mx-auto">
+      <div className="w-full min-w-0 max-w-4xl mx-auto px-3 sm:px-4 py-8 sm:py-16 overflow-x-hidden transition-colors duration-200">
+        <div className="text-center mb-8 sm:mb-12">
+          <h1 className="text-3xl sm:text-4xl font-black text-slate-900 dark:text-neutral-100 mb-4 font-poppins break-words">Interview by Resume</h1>
+          <p className="text-slate-500 dark:text-neutral-400 text-base sm:text-lg font-medium max-w-xl mx-auto">
             Upload your professional profile. Our AI will analyze your experience and skills to create a bespoke interview journey.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          <div className="md:col-span-2">
+        <div className="grid min-w-0 grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8">
+          <div className="min-w-0 md:col-span-2">
             <div 
               onDragOver={onDragOver}
               onDragLeave={onDragLeave}
               onDrop={onDrop}
-              className={`relative bg-white dark:bg-neutral-900 border-4 border-dashed rounded-[3rem] p-12 transition-all group flex flex-col items-center justify-center text-center ${
+              className={`relative min-w-0 bg-white dark:bg-neutral-900 border-4 border-dashed rounded-[2rem] sm:rounded-[3rem] p-6 sm:p-12 transition-all group flex flex-col items-center justify-center text-center ${
                 isDragging ? 'border-blue-500 bg-blue-50 dark:bg-neutral-800 scale-[1.01]' : 'border-slate-100 dark:border-neutral-800 hover:border-blue-200 dark:hover:border-blue-800'
               } ${file ? 'border-emerald-200 dark:border-emerald-900/50' : ''}`}
             >
@@ -130,7 +130,7 @@ const ResumeInterview: React.FC = () => {
                   
                   <button 
                     onClick={() => fileInputRef.current?.click()}
-                    className="bg-blue-600 text-white px-10 py-4 rounded-2xl font-bold hover:bg-blue-700 transition shadow-xl shadow-blue-500/20 dark:shadow-none active:scale-95"
+                    className="max-w-full bg-blue-600 text-white px-6 sm:px-10 py-4 rounded-2xl font-bold hover:bg-blue-700 transition shadow-xl shadow-blue-500/20 dark:shadow-none active:scale-95"
                   >
                     Select File
                   </button>
@@ -235,7 +235,7 @@ const ResumeInterview: React.FC = () => {
           </div>
         </div>
 
-        <div className="mt-16 bg-blue-50/50 dark:bg-neutral-900 rounded-[3rem] p-10 border border-blue-100 dark:border-neutral-800 transition-colors">
+        <div className="mt-10 sm:mt-16 bg-blue-50/50 dark:bg-neutral-900 rounded-[2rem] sm:rounded-[3rem] p-6 sm:p-10 border border-blue-100 dark:border-neutral-800 transition-colors break-words">
           <h4 className="text-blue-700 dark:text-blue-400 font-black text-xs uppercase tracking-widest mb-4">Architecture Insight</h4>
           <p className="text-blue-900/70 dark:text-neutral-400 text-sm font-medium leading-relaxed">
             This module is built for scalability. The UI is decoupled from the storage layer. 

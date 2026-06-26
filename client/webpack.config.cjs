@@ -23,6 +23,16 @@ function loadEnvFile(filePath) {
     }, {});
 }
 
+class CopyPublicPlugin {
+  apply(compiler) {
+    compiler.hooks.afterEmit.tap("CopyPublicPlugin", (compilation) => {
+      const publicPath = path.resolve(__dirname, "public");
+      if (!fs.existsSync(publicPath)) return;
+      fs.cpSync(publicPath, compilation.outputOptions.path, { recursive: true });
+    });
+  }
+}
+
 module.exports = (_env, argv) => {
   const isProd = argv.mode === "production";
   const localEnv = loadEnvFile(path.resolve(__dirname, ".env.local"));
@@ -103,6 +113,8 @@ module.exports = (_env, argv) => {
         template: path.resolve(__dirname, "index.html"),
       }),
 
+      new CopyPublicPlugin(),
+
       new webpack.DefinePlugin({
         "process.env.REACT_APP_CLERK_PUBLISHABLE_KEY": JSON.stringify(
           process.env.REACT_APP_CLERK_PUBLISHABLE_KEY
@@ -113,6 +125,10 @@ module.exports = (_env, argv) => {
     devServer: {
       host: "0.0.0.0",
       port: 3000,
+      static: {
+        directory: path.resolve(__dirname, "public"),
+        publicPath: "/",
+      },
       historyApiFallback: true,
       hot: true,
       client: {

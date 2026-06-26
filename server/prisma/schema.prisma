@@ -34,9 +34,11 @@ model Interview {
   userId     Int            @map("user_id")
   role       String
   experience String
+  personality String        @default("Senior Engineering Manager")
   techStack  Json           @map("tech_stack")
   status     InterviewStatus @default(IN_PROGRESS)
   warningCount Int          @default(0) @map("warning_count")
+  followUpCount Int         @default(0) @map("follow_up_count")
   createdAt  DateTime       @default(now()) @map("created_at")
   completedAt DateTime?     @map("completed_at")
 
@@ -83,6 +85,12 @@ model Answer {
   id         Int      @id @default(autoincrement())
   questionId Int      @map("question_id")
   answerText String   @map("answer_text")
+  followUpQuestion String? @map("follow_up_question") @db.Text
+  followUpAnswer String? @map("follow_up_answer") @db.Text
+  followUpReason String? @map("follow_up_reason") @db.VarChar(500)
+  interviewerReaction String? @map("interviewer_reaction") @db.VarChar(500)
+  timeTakenSeconds Int? @map("time_taken_seconds")
+  followUpTimeTakenSeconds Int? @map("follow_up_time_taken_seconds")
   code       String?  @db.Text
   score      Int?
   technicalAccuracy Int? @map("technical_accuracy")
@@ -90,6 +98,8 @@ model Answer {
   communicationScore Int? @map("communication_score")
   semanticSimilarity Int? @map("semantic_similarity")
   finalScore Int? @map("final_score")
+  mainAnswerScore Int? @map("main_answer_score")
+  followUpScore Int? @map("follow_up_score")
   matchedConcepts Json? @map("matched_concepts")
   missingConcepts Json? @map("missing_concepts")
   factorScores Json? @map("factor_scores")
@@ -130,6 +140,8 @@ model Result {
   interviewId  Int      @unique @map("interview_id")
   overallScore Int      @map("overall_score")
   summary      String   @db.Text
+  questionWiseResults Json? @map("question_wise_results")
+  recommendedFocusAreas Json? @map("recommended_focus_areas")
   createdAt    DateTime @default(now()) @map("created_at")
 
   interview Interview @relation(fields: [interviewId], references: [id])

@@ -16,6 +16,7 @@ import {
 } from "../domain/interviewDomain";
 
 type Difficulty = "easy" | "medium" | "hard";
+export type InterviewerPersonality = "Friendly HR" | "Strict Technical Lead" | "Senior Engineering Manager";
 type Rating = "Poor" | "Average" | "Good" | "Excellent";
 export type CodingTestCase = {
   input: unknown;
@@ -46,6 +47,7 @@ export type InterviewQuestionDraft = {
   question: string;
   expectedAnswer: string;
   keyConcepts: string[];
+  rubricFocus?: string[];
   difficulty: Difficulty;
   topic: string;
   questionType: QuestionType;
@@ -70,6 +72,8 @@ export type InterviewBatchAnswerInput = {
   expectedAnswer?: string | null;
   keyConcepts?: string[];
   userAnswer: string;
+  followUpQuestion?: string | null;
+  followUpAnswer?: string | null;
   code?: string | null;
   explanation?: string | null;
   testCases?: CodingTestCase[];
@@ -96,6 +100,8 @@ export type InterviewBatchAnswerEvaluation = {
   score100: number;
   aiScore: number;
   finalScore: number;
+  mainAnswerScore: number;
+  followUpScore: number | null;
   rating: Rating;
   factorScores: RubricFactorScores;
   feedback: string;
@@ -109,11 +115,30 @@ export type InterviewBatchAnswerEvaluation = {
   technicalAccuracy: number;
   semanticSimilarity: number;
   correctnessLocked?: boolean;
+  itemScore?: number;
+  rubricScores?: { relevance: number; technicalAccuracy: number; completeness: number; communication: number; structure: number; examples: number; fluency: number };
+  communicationConfidence?: number;
+  confidenceLevel?: "low" | "medium" | "high";
+  improvementSuggestion?: string;
 };
 export type InterviewBatchEvaluationResult = {
   evaluations: InterviewBatchAnswerEvaluation[];
   summary: string;
+  evaluationAvailable: boolean;
 };
+
+const EMPTY_ANSWER_MARKERS = new Set(["", "(no verbal response)", "no verbal response", "(no code submitted)", "no code submitted", "no answer provided", "(no answer provided)", "transcript not available"]);
+
+export function isEmptyInterviewAnswer(value: unknown) {
+  const normalized = String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  return EMPTY_ANSWER_MARKERS.has(normalized);
+}
+
+function zeroFactorScores(questionType: QuestionType): RubricFactorScores {
+  return questionType === "coding"
+    ? { correctness: 0, logicProblemSolving: 0, timeComplexity: 0, spaceComplexity: 0, codeQuality: 0, edgeCaseHandling: 0, explanationCommunication: 0 }
+    : { relevance: 0, technicalAccuracy: 0, completeness: 0, communicationClarity: 0, structureOrganization: 0, examplesPracticalKnowledge: 0, confidenceFluency: 0 };
+}
 
 type OpenRouterErrorKind = "missing_api_key" | "rate_limited" | "invalid_api_key" | "http" | "timeout" | "network" | "unknown" | "empty";
 
@@ -133,7 +158,11 @@ function extractJsonObject(text: string) {
   try {
     return JSON.parse(candidate);
   } catch {
-    return null;
+    try {
+      return JSON.parse(candidate.replace(/^\uFEFF/, "").replace(/,\s*([}\]])/g, "$1"));
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -586,6 +615,34 @@ function buildFallbackHiddenTestCases(): CodingTestCase[] {
   ];
 }
 
+export function buildQuestionSpecificRubric(question: string, skill: string) {
+  const q = question.toLowerCase();
+  let concepts: string[];
+  if (/missing value|imput/.test(q)) concepts = ["missingness mechanism", "imputation strategy", "bias and leakage", "validation"];
+  else if (/overfitting|underfitting/.test(q)) concepts = ["bias-variance tradeoff", "training versus validation performance", "regularization", "cross-validation"];
+  else if (/classification model|logistic regression|decision tree/.test(q)) concepts = ["model assumptions", "decision boundary", "interpretability", "validation metrics"];
+  else if (/test|testing/.test(q)) concepts = ["unit tests", "integration tests", "edge cases", "regression protection"];
+  else if (/performance|optimi/.test(q)) concepts = ["measurement", "bottleneck identification", "tradeoffs", "validation"];
+  else if (/failure|error|production/.test(q)) concepts = ["failure modes", "observability", "safe recovery", "preventive controls"];
+  else if (/complexity|algorithm|implement|function/.test(q)) concepts = ["correctness", "edge cases", "time complexity", "space complexity"];
+  else concepts = [skill || "core concept", "reasoning", "concrete example", "tradeoffs"];
+  const subject = question.replace(/[?!.]+$/, "").trim();
+  const expectedAnswer = `A strong answer should directly resolve the question, “${subject}.” It should accurately explain ${concepts.slice(0, 3).join(", ")}, and connect the reasoning to ${concepts[3]} with a concrete example or decision.`;
+  return { expectedAnswer, expectedConcepts: concepts, rubricFocus: ["technical accuracy", "question completeness", "practical reasoning"] };
+}
+
+function domainRequiresCodingTasks(role: string, selectedSkills: string[]) {
+  const normalizedRole = role.trim().toLowerCase();
+  const tools = selectedSkills.join(" ").toLowerCase();
+  if (/ui\s*\/\s*ux|ux\s*\/\s*ui|design|human resources|^hr$/.test(normalizedRole)) return false;
+  if (/data science|data analyst/.test(normalizedRole)) {
+    return /python|pandas|numpy|scikit|sklearn|machine learning|\bml\b|sql|spark|r programming|jupyter/.test(tools);
+  }
+  if (/frontend|front-end|backend|back-end|full stack|full-stack/.test(normalizedRole)) return true;
+  if (domainNeedsCoding(role)) return true;
+  return /(software|developer|programmer|engineer)/.test(normalizedRole) && /python|javascript|typescript|java|c\+\+|\bc\b|node|sql/.test(tools);
+}
+
 export function buildFallbackInterviewQuestions(input: {
   difficulty: Difficulty;
   role: string;
@@ -595,8 +652,9 @@ export function buildFallbackInterviewQuestions(input: {
 }): InterviewQuestionDraft[] {
   const count = Math.max(1, Math.floor(input.count ?? 10));
   const selectedSkills = input.selectedSkills ? [...input.selectedSkills] : extractSelectedSkills(input.techStack);
-  const codingSkills = getCodingEligibleSkills(input.role, selectedSkills);
-  const questionTypePlan = buildQuestionTypePlan(input.role, codingSkills, count);
+  const requiresCodingTasks = domainRequiresCodingTasks(input.role, selectedSkills);
+  const codingSkills = requiresCodingTasks ? getCodingEligibleSkills(input.role, selectedSkills) : [];
+  const questionTypePlan = buildQuestionTypePlan(codingSkills, count, requiresCodingTasks);
   let codingQuestionIndex = 0;
   let mcqQuestionIndex = 0;
 
@@ -608,15 +666,38 @@ export function buildFallbackInterviewQuestions(input: {
       : fallbackSkill;
     const coding = questionType === "coding" ? buildCodingFallback(skill, codingQuestionIndex - 1) : null;
     const mcq = questionType === "mcq" ? buildMcqFallback(input.role, skill, mcqQuestionIndex++) : null;
-    const practicalConstraints = questionType === "practical"
-      ? /html|css/i.test(skill)
-        ? ["Use semantic structure", "Describe mobile and desktop behavior", "Address keyboard and contrast accessibility"]
-        : ["State assumptions", "Explain the proposed approach", "Include validation criteria"]
-      : undefined;
+    const practical = questionType === "practical"
+      ? /sql/i.test(skill)
+        ? {
+            question: "Write a SQL query that returns each customer with their total completed-order value, including customers with no completed orders, ordered by total value descending.",
+            constraints: ["Use a LEFT JOIN", "Exclude non-completed orders from the total", "Return zero for customers without completed orders"],
+            expectedOutput: "One row per customer with customer identifier and completed_order_total, highest total first.",
+          }
+        : /data science|data analyst/i.test(input.role)
+          ? {
+              question: "Write data-processing logic that counts missing values in every dataset column and returns the counts ordered from highest to lowest.",
+              constraints: ["Handle columns with zero missing values", "Do not mutate the input dataset", "Return a deterministic ordering for ties"],
+              expectedOutput: "A column-to-missing-count result ordered by descending missing count.",
+            }
+          : /frontend|ui/i.test(input.role)
+            ? {
+                question: "Write the component and styling logic for an accessible responsive navigation menu that works with keyboard input and collapses on small screens.",
+                constraints: ["Use semantic controls", "Support keyboard navigation and visible focus", "Describe the mobile breakpoint behavior"],
+                expectedOutput: "A responsive navigation implementation with accessible expanded and collapsed states.",
+              }
+            : {
+                question: "Write implementation logic that validates an incoming request, rejects invalid fields, and returns a normalized object without mutating the input.",
+                constraints: ["Return clear validation errors", "Preserve valid false and zero values", "Do not mutate the input"],
+                expectedOutput: "A normalized object for valid input or structured validation errors for invalid input.",
+              }
+      : null;
+    const question = coding?.question ?? practical?.question ?? mcq?.question ?? getNonCodingFallback(input.role, skill, index);
+    const rubric = buildQuestionSpecificRubric(question, skill);
     return {
-      question: coding?.question ?? mcq?.question ?? getNonCodingFallback(input.role, skill, index),
-      expectedAnswer: `A strong answer should show accurate ${skill} knowledge, clear reasoning, practical tradeoffs, validation, and production considerations.`,
-      keyConcepts: [skill, "Technical correctness", "Practical tradeoffs", "Edge cases", "Validation"],
+      question,
+      expectedAnswer: rubric.expectedAnswer,
+      keyConcepts: rubric.expectedConcepts,
+      rubricFocus: rubric.rubricFocus,
       difficulty: input.difficulty,
       topic: skill,
       questionType,
@@ -625,8 +706,8 @@ export function buildFallbackInterviewQuestions(input: {
       starterCode: coding?.starterCode,
       testCases: coding?.visibleTestCases,
       hiddenTestCases: coding?.hiddenTestCases,
-      constraints: coding?.constraints ?? practicalConstraints,
-      expectedOutput: coding?.expectedOutput,
+      constraints: coding?.constraints ?? practical?.constraints,
+      expectedOutput: coding?.expectedOutput ?? practical?.expectedOutput,
       evaluationType: coding?.evaluationType,
       options: mcq?.options,
       correctOption: mcq?.correctOption,
@@ -637,12 +718,12 @@ export function buildFallbackInterviewQuestions(input: {
   });
 }
 
-function buildQuestionTypePlan(role: string, codingSkills: string[], count: number): QuestionType[] {
-  const base: QuestionType[] = !domainNeedsCoding(role)
-    ? ["theory", "theory", "mcq", "scenario", "theory", "mcq", "theory", "scenario", "mcq", "theory"]
+function buildQuestionTypePlan(codingSkills: string[], count: number, requiresCodingTasks: boolean): QuestionType[] {
+  const base: QuestionType[] = !requiresCodingTasks
+    ? ["theory", "theory", "scenario", "theory", "theory", "scenario", "theory", "theory", "scenario", "theory"]
     : codingSkills.length
-      ? ["theory", "theory", "coding", "theory", "theory", "coding", "theory", "theory", "coding", "theory"]
-      : ["theory", "theory", "theory", "theory", "practical", "theory", "theory", "theory", "theory", "practical"];
+      ? ["theory", "theory", "theory", "coding", "theory", "theory", "theory", "theory", "theory", "coding"]
+      : ["theory", "theory", "theory", "practical", "theory", "theory", "theory", "theory", "theory", "practical"];
   return Array.from({ length: count }, (_, index) => base[index % base.length]);
 }
 
@@ -754,6 +835,70 @@ async function openRouterChat(prompt: string, opts?: { timeoutMs?: number; maxTo
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export type FollowUpDecision = {
+  followUpNeeded: boolean;
+  reason: string;
+  interviewerReaction: string;
+  followUpQuestion: string | null;
+};
+
+export async function generateFollowUpQuestion(input: {
+  question: string;
+  answer: string;
+  role: string;
+  techStack: unknown;
+  difficulty: Difficulty;
+  interviewType: string;
+  personality: InterviewerPersonality;
+  expectedAnswer?: string | null;
+  keyConcepts?: string[];
+}): Promise<FollowUpDecision> {
+  const fallback: FollowUpDecision = {
+    followUpNeeded: false,
+    reason: "Follow-up generation was unavailable.",
+    interviewerReaction: "Thank you. Let's move to the next question.",
+    followUpQuestion: null,
+  };
+  const prompt = [
+    "You are conducting a structured interview, not an open-ended chat.",
+    "Decide whether exactly one clarifying follow-up is needed because the answer is too short, vague, incomplete, says I don't know, or misses an important concept.",
+    "Do not ask a follow-up merely to add variety. Keep the reaction professional and under 18 words. Keep the follow-up to one concise question.",
+    "The follow-up must sound as though you listened: refer naturally to the candidate's claim, wording, example, or missing detail.",
+    "When a follow-up is needed, the reaction should be a natural bridge such as 'I'd like to explore that a little more.' Never mention moving to the next question.",
+    "Never begin with or include: 'This is a follow-up question', 'Here is your follow-up', 'Follow-up question:', or 'I will now ask you'.",
+    "Prefer natural forms such as 'You mentioned X. Can you explain Y?', 'Can you give one practical example?', or 'What exactly improves?'.",
+    `Personality: ${input.personality}. Never be rude or discouraging.`,
+    `Role: ${clip(input.role, 100)}`,
+    `Tech stack: ${clip(JSON.stringify(input.techStack ?? {}), 500)}`,
+    `Difficulty: ${input.difficulty}`,
+    `Interview type: ${clip(input.interviewType, 80)}`,
+    `Question: ${clip(input.question, 700)}`,
+    `Candidate answer: ${clip(input.answer, 1500)}`,
+    `Expected answer: ${clip(input.expectedAnswer ?? "", 900)}`,
+    `Important concepts: ${JSON.stringify(normalizeConceptList(input.keyConcepts))}`,
+    "Return STRICT JSON only with exactly this shape:",
+    '{"followUpNeeded":true,"reason":"","interviewerReaction":"","followUpQuestion":""}',
+    "When followUpNeeded is false, followUpQuestion must be null.",
+  ].join("\n");
+  const response = await openRouterChat(prompt, { timeoutMs: 15000, maxTokens: 280 });
+  if (!response.ok) {
+    logOpenRouterFailure("generateFollowUpQuestion", response.error);
+    return fallback;
+  }
+  const raw = extractJsonObject(response.text) as any;
+  if (!raw || typeof raw.followUpNeeded !== "boolean") return fallback;
+  const needed = raw.followUpNeeded === true && typeof raw.followUpQuestion === "string" && raw.followUpQuestion.trim().length > 4;
+  const naturalQuestion = needed
+    ? clip(raw.followUpQuestion, 700).replace(/^\s*(?:this is (?:a|your) follow-up question[.:;-]?|here is your follow-up[.:;-]?|follow-up(?: question)?\s*:|i will now ask you[.:;-]?)\s*/i, "").trim()
+    : null;
+  return {
+    followUpNeeded: Boolean(needed && naturalQuestion),
+    reason: clip(raw.reason || (needed ? "The answer needs clarification." : "The answer is sufficiently complete."), 500),
+    interviewerReaction: clip(raw.interviewerReaction || (needed ? "Okay, let's explore that a little further." : "Good explanation. Let's move to the next topic."), 300),
+    followUpQuestion: naturalQuestion || null,
+  };
 }
 
 export type CodingTestCaseResult = {
@@ -900,11 +1045,13 @@ export async function generateInterviewQuestionsBatch(input: {
   techStack: unknown;
   selectedSkills?: readonly string[];
   count?: number;
+  personality?: InterviewerPersonality;
 }): Promise<InterviewQuestionDraft[]> {
   const count = Math.max(1, Math.floor(input.count ?? 10));
   const selectedSkills = input.selectedSkills ? [...input.selectedSkills] : extractSelectedSkills(input.techStack);
-  const codingSkills = getCodingEligibleSkills(input.role, selectedSkills);
-  const questionTypePlan = buildQuestionTypePlan(input.role, codingSkills, count);
+  const requiresCodingTasks = domainRequiresCodingTasks(input.role, selectedSkills);
+  const codingSkills = requiresCodingTasks ? getCodingEligibleSkills(input.role, selectedSkills) : [];
+  const questionTypePlan = buildQuestionTypePlan(codingSkills, count, requiresCodingTasks);
   const codingQuestionCount = questionTypePlan.filter((type) => type === "coding").length;
   const expectedTypeCounts = questionTypePlan.reduce<Record<string, number>>((counts, type) => {
     counts[type] = (counts[type] ?? 0) + 1;
@@ -924,32 +1071,40 @@ export async function generateInterviewQuestionsBatch(input: {
     `Difficulty: ${input.difficulty}`,
     `Role context only: ${clip(input.role, 80)}`,
     `Experience: ${clip(input.experience, 120)}`,
+    `Interviewer personality: ${input.personality ?? "Senior Engineering Manager"}. Keep the tone professional, constructive, and never rude.`,
     `User-selected skills (exact allowed list): ${selectedSkills.length ? selectedSkills.join(", ") : "none"}`,
     `Required question distribution: ${Object.entries(expectedTypeCounts).map(([type, amount]) => `${amount} ${type}`).join(", ")}.`,
+    `Domain policy requires coding/data tasks: ${requiresCodingTasks ? "yes" : "no"}. Never generate coding or implementation-practical questions when it is no.`,
     codingQuestionCount
       ? `Coding questions may use only these coding-capable selected skills: ${codingSkills.join(", ")}. Rotate them when possible.`
       : domainNeedsCoding(input.role)
         ? "No compiler-supported skill was selected. Generate theory and practical questions only."
         : `This interview must contain no coding questions. Use ${nonCodingFocus}, MCQ, and scenario questions according to the required distribution.`,
     "Generate interview questions for AceMock. Every question skill/topic must be one exact user-selected skill when skills are provided.",
+    "Each question must focus on one primary skill or one coherent pair. Never concatenate or randomly combine the whole tech stack in a question.",
+    "For Data Science theory, prefer realistic statistics, data cleaning, model selection, overfitting, feature engineering, and evaluation questions tied to the selected skill.",
+    "For an enabled Data Science coding round, ask a concrete Python data task such as mean/median, duplicate removal, or missing-value counts; never ask a vague production implementation.",
     "Use the domain and selected skill as context. Keep the skill in the skill/topic field; do not force its name into every sentence.",
     "Questions must sound like realistic interview prompts with a concrete problem, decision, or scenario. Avoid generic definitions and template wording.",
     "A question must not mention its selected skill more than twice.",
     "HTML/CSS questions must be layout or UI tasks. Never ask for a function in HTML or a CSS function.",
     `Compiler coding is allowed only for these selected skills: ${codingSkills.join(", ") || "none"}. Do not treat HTML, CSS, React, Figma, UX/UI, SQL, Pandas, QA tools, cloud, security, or DevOps tools as compiler languages.`,
     "Every coding item must include skill, language, starterCode, visibleTestCases, hiddenTestCases, constraints, expectedOutput, evaluationType='function', expectedTimeComplexity, and expectedSpaceComplexity.",
+    "Every required practical item in a coding-enabled interview must explicitly require writing code, a SQL query, an algorithm, UI implementation, or data-processing logic. It must include at least two concrete constraints and a verifiable expectedOutput.",
+    "Never label a discussion, architecture explanation, production decision, or case-study response as practical. Those are theory or scenario questions and use the short timer.",
     "visibleTestCases and hiddenTestCases use {\"input\":...,\"expectedOutput\":...}.",
     "Use questionType theory, coding, mcq, practical, or scenario. HTML/CSS should use practical or theory. Coding domains must not receive MCQs unless a future explicit MCQ practice mode is provided.",
     "Every mcq item must include exactly four options, correctOption A/B/C/D, and a short explanation.",
     "Never use the word emphasize in a question.",
     "Never write phrases such as 'Implement solution', 'using the selected technology', or 'based on the selected skill'.",
-    "For non-coding questions, omit compiler metadata. Practical questions may include a constraints checklist.",
+    "For theory and scenario questions, omit compiler metadata. Practical implementation questions must include constraints and expectedOutput but may omit compiler-only test metadata.",
     "Do not repeat or closely paraphrase questions.",
     "Return STRICT JSON array only. No markdown.",
-    "Each item must have this shape:",
-    `{"question":"","expectedAnswer":"","keyConcepts":[],"difficulty":"${input.difficulty}","topic":"","questionType":"theory","skill":"","language":"","starterCode":"","visibleTestCases":[],"hiddenTestCases":[],"constraints":[],"expectedOutput":"","evaluationType":"","options":[],"correctOption":"","explanation":"","expectedTimeComplexity":"","expectedSpaceComplexity":""}`,
-    "expectedAnswer must be the answer rubric, not too long.",
-    "keyConcepts must contain 4-8 required concepts.",
+    "Each item must have this shape (compiler metadata remains required for coding items):",
+    `{"questionText":"","expectedAnswer":"","expectedConcepts":[],"rubricFocus":[],"difficulty":"${input.difficulty}","topic":"","questionType":"theory","skill":"","language":"","starterCode":"","visibleTestCases":[],"hiddenTestCases":[],"constraints":[],"expectedOutput":"","evaluationType":"","options":[],"correctOption":"","explanation":"","expectedTimeComplexity":"","expectedSpaceComplexity":""}`,
+    "expectedAnswer must contain 2-4 specific sentences based on that exact question and concrete concepts needed to answer it.",
+    "Never create an expectedAnswer by listing or repeating the selected skills, domain, or generic phrases such as 'show accurate knowledge'.",
+    "expectedConcepts must contain 4-8 concepts unique to that question. rubricFocus must contain 2-5 question-specific scoring priorities.",
   ].join("\n");
 
   const parseAndValidate = (parsed: unknown): InterviewQuestionDraft[] | null => {
@@ -962,14 +1117,17 @@ export async function generateInterviewQuestionsBatch(input: {
     for (const value of parsed) {
       if (!value || typeof value !== "object") return null;
       const raw = value as Record<string, unknown>;
-      const question = String(raw.question ?? "").trim();
+      const question = String(raw.questionText ?? raw.question_text ?? raw.question ?? "").trim();
       const expectedAnswer = String(raw.expectedAnswer ?? raw.expected_answer ?? "").trim();
-      const keyConcepts = normalizeConceptList(raw.keyConcepts ?? raw.key_concepts);
+      const keyConcepts = normalizeConceptList(raw.expectedConcepts ?? raw.expected_concepts ?? raw.keyConcepts ?? raw.key_concepts);
+      const rubricFocus = normalizeConceptList(raw.rubricFocus ?? raw.rubric_focus);
       const questionType = normalizeQuestionType(raw.questionType ?? raw.question_type ?? raw.type, "theory");
       const rawSkill = String(raw.skill ?? raw.topic ?? "").trim();
       const skill = selectedSkills.length ? findSelectedSkillReference(rawSkill, selectedSkills) : rawSkill || input.role;
       const normalized = normalizeQuestionForDedupe(question);
-      if (!question || !expectedAnswer || !keyConcepts.length || !skill || seen.has(normalized) || hasPoorQuestionQuality(question, skill, questionTexts)) return null;
+      const mentionedSkills = selectedSkills.filter((selected) => selected.length >= 3 && question.toLowerCase().includes(selected.toLowerCase()));
+      const expectedSentenceCount = (expectedAnswer.match(/[.!?](?:\s|$)/g) ?? []).length;
+      if (!question || !expectedAnswer || expectedSentenceCount < 2 || expectedSentenceCount > 4 || keyConcepts.length < 4 || rubricFocus.length < 2 || /show accurate .* knowledge/i.test(expectedAnswer) || !skill || mentionedSkills.length > 2 || seen.has(normalized) || hasPoorQuestionQuality(question, skill, questionTexts)) return null;
       seen.add(normalized);
       questionTexts.push(question);
 
@@ -982,9 +1140,11 @@ export async function generateInterviewQuestionsBatch(input: {
           const correctOption = String(raw.correctOption ?? raw.correct_option ?? "").trim().toUpperCase();
           const explanation = String(raw.explanation ?? "").trim();
           if (options.length !== 4 || !/^[A-D]$/.test(correctOption) || !explanation) return null;
-          questions.push({ question, expectedAnswer, keyConcepts, difficulty, topic: skill, questionType, options, correctOption, explanation });
+          questions.push({ question, expectedAnswer, keyConcepts, rubricFocus, difficulty, topic: skill, questionType, options, correctOption, explanation });
         } else {
-          questions.push({ question, expectedAnswer, keyConcepts, difficulty, topic: skill, questionType, constraints });
+          const expectedOutput = String(raw.expectedOutput ?? raw.expected_output ?? "").trim();
+          if (questionType === "practical" && !/\b(write|implement|build|create|code|coding|algorithm|query|data-processing|component|function|logic)\b/i.test(question)) return null;
+          questions.push({ question, expectedAnswer, keyConcepts, rubricFocus, difficulty, topic: skill, questionType, constraints, expectedOutput: expectedOutput || undefined });
         }
         continue;
       }
@@ -1011,7 +1171,7 @@ export async function generateInterviewQuestionsBatch(input: {
       ) return null;
 
       questions.push({
-        question, expectedAnswer, keyConcepts, difficulty, topic: skill, questionType,
+        question, expectedAnswer, keyConcepts, rubricFocus, difficulty, topic: skill, questionType,
         skill, language, starterCode, testCases, hiddenTestCases, constraints,
         expectedOutput, evaluationType, expectedTimeComplexity, expectedSpaceComplexity,
       });
@@ -1066,9 +1226,9 @@ export async function generateInterviewQuestion(input: {
       : "Make it a theory/technical discussion question (no coding).",
     "Avoid repeating or closely paraphrasing previous questions.",
     "Return STRICT JSON only:",
-    `{"question":"","expectedAnswer":"","keyConcepts":[],"difficulty":"${input.difficulty}","topic":""}`,
-    "expectedAnswer must be the answer rubric, not too long.",
-    "keyConcepts must contain 4-8 required concepts.",
+    `{"questionText":"","expectedAnswer":"","expectedConcepts":[],"rubricFocus":[],"difficulty":"${input.difficulty}","topic":""}`,
+    "expectedAnswer must contain 2-4 concrete, question-specific sentences and must not repeat the tech stack generically.",
+    "expectedConcepts must contain 4-8 required concepts and rubricFocus must contain 2-5 scoring priorities.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -1086,16 +1246,18 @@ export async function generateInterviewQuestion(input: {
   if (r.ok) {
     const obj = extractJsonObject(r.text);
     if (obj && typeof obj === "object") {
-      const question = String((obj as any).question ?? "").trim();
+      const question = String((obj as any).questionText ?? (obj as any).question_text ?? (obj as any).question ?? "").trim();
       const expectedAnswer = String((obj as any).expectedAnswer ?? (obj as any).expected_answer ?? "").trim();
-      const keyConcepts = normalizeConceptList((obj as any).keyConcepts ?? (obj as any).key_concepts);
+      const keyConcepts = normalizeConceptList((obj as any).expectedConcepts ?? (obj as any).expected_concepts ?? (obj as any).keyConcepts ?? (obj as any).key_concepts);
+      const rubricFocus = normalizeConceptList((obj as any).rubricFocus ?? (obj as any).rubric_focus);
       const topic = String((obj as any).topic ?? fallbackTopic ?? input.role).trim();
       const difficulty = String((obj as any).difficulty ?? input.difficulty).trim().toLowerCase();
-      if (question && expectedAnswer && keyConcepts.length) {
+      if (question && expectedAnswer && keyConcepts.length >= 4 && rubricFocus.length >= 2) {
         return {
           question,
           expectedAnswer,
           keyConcepts,
+          rubricFocus,
           difficulty: isDifficulty(difficulty) ? difficulty : input.difficulty,
           topic: topic || input.role,
         };
@@ -1104,10 +1266,12 @@ export async function generateInterviewQuestion(input: {
   }
 
   if (!r.ok) logOpenRouterFailure("generateInterviewQuestion", r.error);
+  const fallbackRubric = buildQuestionSpecificRubric(fallbackQuestion, fallbackTopic || input.role);
   return {
     question: fallbackQuestion,
-    expectedAnswer: `A strong answer should accurately explain the core ${fallbackTopic || input.role} concepts, include practical tradeoffs, and mention production considerations.`,
-    keyConcepts: ["Core concept", "Practical use", "Tradeoffs", "Production considerations"],
+    expectedAnswer: fallbackRubric.expectedAnswer,
+    keyConcepts: fallbackRubric.expectedConcepts,
+    rubricFocus: fallbackRubric.rubricFocus,
     difficulty: input.difficulty,
     topic: fallbackTopic || input.role,
   };
@@ -1115,6 +1279,44 @@ export async function generateInterviewQuestion(input: {
 
 function buildFallbackAnswerEvaluation(input: InterviewBatchAnswerInput): InterviewBatchAnswerEvaluation {
   const keyConcepts = normalizeConceptList(input.keyConcepts);
+  const empty = isEmptyInterviewAnswer(input.userAnswer);
+  const fallbackFeedback = empty
+    ? "No answer was provided, so this question could not be evaluated."
+    : "Evaluation unavailable. Please retry evaluation.";
+  if (Number.isFinite(input.answerId)) return {
+    questionId: input.questionId,
+    answerId: input.answerId,
+    questionType: input.questionType,
+    score: 0,
+    score100: 0,
+    aiScore: 0,
+    finalScore: 0,
+    mainAnswerScore: 0,
+    followUpScore: empty ? null : input.followUpQuestion ? 0 : null,
+    rating: "Poor",
+    factorScores: zeroFactorScores(input.questionType),
+    feedback: fallbackFeedback,
+    strengths: "",
+    weaknesses: empty ? "" : keyConcepts.length ? `Missing: ${keyConcepts.join(", ")}` : "",
+    suggestions: empty
+      ? "Attempt the question by explaining the key concept, giving one example, and mentioning practical considerations."
+      : "Evaluation unavailable. Please retry evaluation.",
+    matchedConcepts: [],
+    missingConcepts: empty ? [] : keyConcepts,
+    communicationScore: 0,
+    conceptCoverage: 0,
+    technicalAccuracy: 0,
+    semanticSimilarity: 0,
+    correctnessLocked: input.questionType === "coding",
+    ...(empty ? {
+      itemScore: 0,
+      rubricScores: { relevance: 0, technicalAccuracy: 0, completeness: 0, communication: 0, structure: 0, examples: 0, fluency: 0 },
+      communicationConfidence: 0,
+      confidenceLevel: "low" as const,
+      improvementSuggestion: "Attempt the question by explaining the key concept, giving one example, and mentioning practical considerations.",
+    } : {}),
+  };
+  /* Defensive legacy path for an invalid non-finite answer id. */
   const answer = String(input.userAnswer ?? "").trim();
   const code = String(input.code ?? (input.questionType === "coding" ? input.userAnswer : "") ?? "").trim();
   const explanation = String(input.explanation ?? "").trim();
@@ -1230,16 +1432,23 @@ function buildFallbackAnswerEvaluation(input: InterviewBatchAnswerInput): Interv
   const finalScore = score100;
   const score = clampNumber(Math.round(score100 / 10), 0, 10, 0);
   const rating = getRating(score100);
+  const followUpText = String(input.followUpAnswer ?? "").trim();
+  const followUpScore = input.followUpQuestion
+    ? clampNumber(followUpText.length < 8 ? 20 : followUpText.length < 50 ? 55 : followUpText.length < 140 ? 70 : 80, 0, 100, 0)
+    : null;
+  const combinedScore = followUpScore === null ? score100 : Math.round(score100 * 0.7 + followUpScore * 0.3);
 
   return {
     questionId: input.questionId,
     answerId: input.answerId,
     questionType: input.questionType,
     score,
-    score100,
-    aiScore: score100,
-    finalScore,
-    rating,
+    score100: combinedScore,
+    aiScore: combinedScore,
+    finalScore: combinedScore,
+    mainAnswerScore: score100,
+    followUpScore,
+    rating: getRating(combinedScore),
     factorScores,
     feedback,
     strengths: matchedConcepts.length ? `Covered: ${matchedConcepts.join(", ")}` : "",
@@ -1281,8 +1490,12 @@ function coerceBatchAnswerEvaluation(
   raw: Record<string, unknown>,
   fallback: InterviewBatchAnswerEvaluation
 ): InterviewBatchAnswerEvaluation {
-  const matchedConcepts = normalizeConceptList(raw.matchedConcepts ?? raw.matched_concepts);
-  const missingConcepts = normalizeConceptList(raw.missingConcepts ?? raw.missing_concepts);
+  const allowedConcepts = fallback.missingConcepts;
+  const allowedByKey = new Map(allowedConcepts.map((concept) => [concept.toLowerCase(), concept]));
+  const rawMatchedConcepts = normalizeConceptList(raw.matchedConcepts ?? raw.matched_concepts);
+  const rawMissingConcepts = normalizeConceptList(raw.missingConcepts ?? raw.missing_concepts);
+  const matchedConcepts = rawMatchedConcepts.map((concept) => allowedByKey.get(concept.toLowerCase())).filter((concept): concept is string => Boolean(concept));
+  const missingConcepts = rawMissingConcepts.map((concept) => allowedByKey.get(concept.toLowerCase())).filter((concept): concept is string => Boolean(concept));
   const questionType = fallback.questionType;
   const factorScores = questionType === "coding"
     ? normalizeCodingFactorScores(raw.factorScores ?? raw.factor_scores, fallback.factorScores as CodingFactorScores)
@@ -1294,7 +1507,13 @@ function coerceBatchAnswerEvaluation(
     ? calculateCodingScore(factorScores as CodingFactorScores)
     : calculateTheoryScore(factorScores as TheoryFactorScores);
   const aiScore = clampNumber(raw.aiScore ?? raw.ai_score, 0, 100, factorScore100);
-  const finalScore = clampNumber(raw.finalScore ?? raw.final_score, 0, 100, aiScore);
+  const mainAnswerScore = clampNumber(raw.mainAnswerScore ?? raw.main_answer_score, 0, 100, aiScore);
+  const followUpScore = fallback.followUpScore === null || raw.followUpScore === null || raw.follow_up_score === null
+    ? null
+    : clampNumber(raw.followUpScore ?? raw.follow_up_score, 0, 100, fallback.followUpScore ?? 0);
+  const finalScore = followUpScore === null
+    ? mainAnswerScore
+    : Math.round(mainAnswerScore * 0.7 + followUpScore * 0.3);
   const score100 = finalScore;
   const score = clampNumber(Math.round(score100 / 10), 0, 10, fallback.score);
   const rating = getRating(score100);
@@ -1315,6 +1534,8 @@ function coerceBatchAnswerEvaluation(
     score100,
     aiScore,
     finalScore,
+    mainAnswerScore,
+    followUpScore,
     rating,
     factorScores,
     feedback: feedback || buildFeedbackFromRubricEvidence({
@@ -1328,8 +1549,8 @@ function coerceBatchAnswerEvaluation(
     strengths,
     weaknesses,
     suggestions,
-    matchedConcepts: matchedConcepts.length ? matchedConcepts : fallback.matchedConcepts,
-    missingConcepts: missingConcepts.length ? missingConcepts : fallback.missingConcepts,
+    matchedConcepts,
+    missingConcepts,
     communicationScore: clampNumber(
       raw.communicationScore ?? raw.communication_score,
       0,
@@ -1388,22 +1609,34 @@ export async function evaluateInterviewBatch(input: {
   experience: string;
   techStack: unknown;
   answers: InterviewBatchAnswerInput[];
+  personality?: InterviewerPersonality;
 }): Promise<InterviewBatchEvaluationResult> {
   const fallbacks = new Map<number, InterviewBatchAnswerEvaluation>();
   for (const answer of input.answers) {
     fallbacks.set(answer.answerId, buildFallbackAnswerEvaluation(answer));
   }
+  const evaluableAnswers = input.answers.filter((answer) => !isEmptyInterviewAnswer(answer.userAnswer));
+  const evaluableIndexByAnswerId = new Map(evaluableAnswers.map((answer, index) => [answer.answerId, index]));
 
   if (!input.answers.length) {
-    return { evaluations: [], summary: "No answers recorded." };
+    return { evaluations: [], summary: "No answers recorded.", evaluationAvailable: true };
+  }
+  if (!evaluableAnswers.length) {
+    const evaluations = input.answers.map((answer) => fallbacks.get(answer.answerId)!);
+    return { evaluations, summary: buildBatchSummary(evaluations), evaluationAvailable: true };
   }
 
   const prompt = [
     "You are a senior technical interviewer.",
     "Evaluate consistently using the question, rubric, transcript/user answer, NLP metrics, and test execution evidence.",
+    "Evaluate every answer only against its own exact question, expected answer, and expected concepts.",
+    "Never reuse feedback, missing concepts, or improvement suggestions across questions. Make each suggestion specific and useful for that question.",
+    "Missing concepts must be selected only from that question's requiredConcepts.",
+    "Empty answers are excluded by the backend and must never receive marks.",
     `Role: ${clip(input.role, 80)}`,
     `Experience: ${clip(input.experience, 140)}`,
     `Tech stack (JSON): ${clip(JSON.stringify(input.techStack ?? []), 500)}`,
+    `Interviewer personality for feedback tone: ${input.personality ?? "Senior Engineering Manager"}. Be professional and constructive.`,
     "Theory rubric:",
     "- relevance: 25%",
     "- technicalAccuracy: 30%",
@@ -1440,6 +1673,7 @@ export async function evaluateInterviewBatch(input: {
     "If an answer is unrelated, give low relevance and a low final score.",
     "If an answer is short but technically correct, do not give extremely low marks.",
     "For coding, prioritize backendHiddenTestExecutionResult when available. If it is available, do not independently judge correctness.",
+    "When no test execution result exists, evaluate submitted code or SQL statically for correctness, logic, edge cases, code quality, and any explanation. Do not require Judge0 or executed tests.",
     "Each factorScores value must be a number from 0 to 100.",
     "Use NLP metrics as communication evidence, not as the only scoring basis.",
     "aiScore is your answer-quality score before NLP adjustment. finalScore may adjust aiScore using NLP clarity/fluency evidence.",
@@ -1451,10 +1685,11 @@ export async function evaluateInterviewBatch(input: {
     "For that calibration, finalScore should usually be around 65-75.",
     "Return STRICT JSON only. No markdown, no prose, no extra keys.",
     "Use exactly this shape:",
-    `{"evaluations":[{"answerId":0,"factorScores":{"relevance":0,"technicalAccuracy":0,"completeness":0,"communicationClarity":0,"structureOrganization":0,"examplesPracticalKnowledge":0,"confidenceFluency":0},"aiScore":0,"finalScore":0,"technicalFeedback":"","communicationFeedback":"","missingConcepts":[],"improvementSuggestion":"","matchedConcepts":[]}]}`,
+    `{"evaluations":[{"answerId":0,"factorScores":{"relevance":0,"technicalAccuracy":0,"completeness":0,"communicationClarity":0,"structureOrganization":0,"examplesPracticalKnowledge":0,"confidenceFluency":0},"mainAnswerScore":0,"followUpScore":null,"technicalFeedback":"","communicationFeedback":"","missingConcepts":[],"improvementSuggestion":"","matchedConcepts":[]}]}`,
+    "Score the main answer and follow-up answer separately. If a follow-up exists, final scoring is computed by the backend as 70% mainAnswerScore + 30% followUpScore.",
     `For coding evaluations, factorScores must be {"correctness":0,"logicProblemSolving":0,"timeComplexity":0,"spaceComplexity":0,"codeQuality":0,"edgeCaseHandling":0,"explanationCommunication":0}.`,
     "Return exactly one evaluation for each Q&A pair, in the same order as the Q&A pairs.",
-    `Q&A pairs:\n${input.answers
+    `Q&A pairs:\n${evaluableAnswers
       .map((item, index) =>
         {
           const code = String(item.code ?? (item.questionType === "coding" ? item.userAnswer : "") ?? "");
@@ -1485,6 +1720,8 @@ export async function evaluateInterviewBatch(input: {
           `nlpAnalysis: ${clip(nlpLine, 700)}`,
           `visibleTestExecutionResult: ${describeCodingTestExecution(item)}`,
           `userTranscriptOrAnswer: ${clip(item.userAnswer, item.questionType === "coding" ? 2000 : 1200)}`,
+          `followUpQuestion: ${clip(item.followUpQuestion ?? "not asked", 500)}`,
+          `followUpAnswer: ${clip(item.followUpAnswer ?? "not answered", 900)}`,
           `submittedCode: ${clip(code, 2200)}`,
           `candidateExplanation: ${clip(explanation, 1000)}`,
         ].join("\n")
@@ -1494,11 +1731,11 @@ export async function evaluateInterviewBatch(input: {
       .join("\n\n")}`,
   ].join("\n");
 
-  const response = await openRouterChat(prompt, { timeoutMs: 40000, maxTokens: 3500 });
+  const response = await openRouterChat(prompt, { timeoutMs: 60000, maxTokens: 4000 });
   if (!response.ok) {
     logOpenRouterFailure("evaluateInterviewBatch", response.error);
     const evaluations = Array.from(fallbacks.values());
-    return { evaluations, summary: buildBatchSummary(evaluations) };
+    return { evaluations, summary: buildBatchSummary(evaluations), evaluationAvailable: false };
   }
 
   const obj = extractJsonObject(response.text);
@@ -1506,8 +1743,9 @@ export async function evaluateInterviewBatch(input: {
     ? (obj as any).evaluations
     : extractJsonArray(response.text);
   if (!Array.isArray(rawEvaluations)) {
+    console.error("[openrouter] evaluateInterviewBatch returned invalid JSON", { responseSnippet: clip(response.text, 2000) });
     const evaluations = Array.from(fallbacks.values());
-    return { evaluations, summary: buildBatchSummary(evaluations) };
+    return { evaluations, summary: buildBatchSummary(evaluations), evaluationAvailable: false };
   }
 
   const rawByAnswerId = new Map<number, Record<string, unknown>>();
@@ -1520,14 +1758,17 @@ export async function evaluateInterviewBatch(input: {
     rawByAnswerId.set(answerId, raw as Record<string, unknown>);
   }
 
-  const evaluations = input.answers.map((answer, index) => {
+  const evaluations = input.answers.map((answer) => {
     const fallback = fallbacks.get(answer.answerId) ?? buildFallbackAnswerEvaluation(answer);
-    const raw = rawByAnswerId.get(answer.answerId) ?? rawByIndex[index];
+    if (isEmptyInterviewAnswer(answer.userAnswer)) return fallback;
+    const raw = rawByAnswerId.get(answer.answerId) ?? rawByIndex[evaluableIndexByAnswerId.get(answer.answerId) ?? -1];
     return raw ? coerceBatchAnswerEvaluation(raw, fallback) : fallback;
   });
   const summary = buildBatchSummary(evaluations);
 
-  return { evaluations, summary };
+  const evaluationAvailable = evaluableAnswers.every((answer) => rawByAnswerId.has(answer.answerId) || rawByIndex[evaluableIndexByAnswerId.get(answer.answerId) ?? -1]);
+  if (!evaluationAvailable) console.error("[openrouter] evaluateInterviewBatch response omitted one or more answers", { expectedAnswerIds: evaluableAnswers.map((answer) => answer.answerId), receivedAnswerIds: Array.from(rawByAnswerId.keys()) });
+  return { evaluations, summary, evaluationAvailable };
 }
 
 export async function evaluateInterviewAnswer(input: {

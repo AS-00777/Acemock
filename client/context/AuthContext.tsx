@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { useAuth as useClerkAuth, useClerk } from "@clerk/clerk-react";
 import { api, ApiError, setAuthTokenGetter } from "../services/api";
 import type { UserProfile } from "../types";
@@ -23,7 +23,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profileLoading, setProfileLoading] = useState(false);
   const [user, setUser] = useState<BackendUser | null>(null);
 
-  useEffect(() => {
+  // Register Clerk's token getter before protected-page passive effects can
+  // issue their first API request after a direct navigation or page refresh.
+  useLayoutEffect(() => {
     setAuthTokenGetter(isSignedIn ? () => getToken() : null);
     return () => setAuthTokenGetter(null);
   }, [getToken, isSignedIn]);

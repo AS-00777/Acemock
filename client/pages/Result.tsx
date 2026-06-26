@@ -5,6 +5,14 @@ import { api, ApiError } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { normalizeConfidence, type ConfidenceLevel } from '../utils/confidence';
 
+function isEmptyDisplayedAnswer(value: unknown) {
+  const normalized = String(value ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+  return normalized === '' || normalized === '(no verbal response)' || normalized === 'no verbal response' || normalized === '(no code submitted)' || normalized === 'no code submitted' || normalized === 'no answer provided' || normalized === '(no answer provided)' || normalized === 'transcript not available';
+}
+
+const zeroTheoryFactors = { relevance: 0, technicalAccuracy: 0, completeness: 0, communicationClarity: 0, structureOrganization: 0, examplesPracticalKnowledge: 0, confidenceFluency: 0 };
+const zeroCodingFactors = { correctness: 0, logicProblemSolving: 0, timeComplexity: 0, spaceComplexity: 0, codeQuality: 0, edgeCaseHandling: 0, explanationCommunication: 0 };
+
 type InterviewDetails = {
   interview: {
     id: number;
@@ -149,6 +157,7 @@ const Result: React.FC = () => {
   const navigate = useNavigate();
   const { logout } = useAuth();
   const [data, setData] = useState<InterviewDetails | null>(null);
+  const [retryingEvaluation, setRetryingEvaluation] = useState(false);
 
   useEffect(() => {
     if (!Number.isFinite(interviewId) || interviewId <= 0) return;
@@ -168,27 +177,30 @@ const Result: React.FC = () => {
       .map((q) => {
         const a = q.answers[0];
         if (!a) return null;
+        const resolvedAnswer = a.correctedTranscript?.trim() || a.answerText;
+        const emptyAnswer = isEmptyDisplayedAnswer(resolvedAnswer);
         return {
           questionText: q.questionText,
           expectedAnswer: q.expectedAnswer ?? undefined,
           keyConcepts: q.keyConcepts ?? [],
           topic: q.topic ?? undefined,
           difficulty: q.difficulty ?? undefined,
-          userAnswer: a.correctedTranscript?.trim() || a.answerText,
+          userAnswer: emptyAnswer ? '' : resolvedAnswer,
+          emptyAnswer,
           rawTranscript: a.rawTranscript ?? undefined,
           correctedTranscript: a.correctedTranscript ?? undefined,
-          feedback: a.feedback ?? undefined,
-          score: a.finalScore ?? (a.score === null ? 0 : a.score * 10),
+          feedback: emptyAnswer ? 'No answer was provided, so this question could not be evaluated.' : a.feedback ?? undefined,
+          score: emptyAnswer ? 0 : a.finalScore ?? (a.score === null ? 0 : a.score * 10),
           type: q.type ?? 'theory',
-          factorScores: a.factorScores ?? null,
-          matchedConcepts: a.matchedConcepts ?? [],
-          missingConcepts: a.missingConcepts ?? [],
-          strengths: a.strengths ?? undefined,
-          weaknesses: a.weaknesses ?? undefined,
-          suggestions: a.suggestions ?? undefined,
-          confidenceScore: a.confidenceScore ?? undefined,
-          confidenceReasons: a.confidenceReasons ?? [],
-          confidenceTips: a.confidenceTips ?? [],
+          factorScores: emptyAnswer ? (q.type === 'coding' ? zeroCodingFactors : zeroTheoryFactors) : a.factorScores ?? null,
+          matchedConcepts: emptyAnswer ? [] : a.matchedConcepts ?? [],
+          missingConcepts: emptyAnswer ? [] : a.missingConcepts ?? [],
+          strengths: emptyAnswer ? undefined : a.strengths ?? undefined,
+          weaknesses: emptyAnswer ? undefined : a.weaknesses ?? undefined,
+          suggestions: emptyAnswer ? 'Attempt the question by explaining the key concept, giving one example, and mentioning practical considerations.' : a.suggestions ?? undefined,
+          confidenceScore: emptyAnswer ? 0 : a.confidenceScore ?? undefined,
+          confidenceReasons: emptyAnswer ? [] : a.confidenceReasons ?? [],
+          confidenceTips: emptyAnswer ? [] : a.confidenceTips ?? [],
           codingAnswer: a.code ?? (a.answerText.includes('\n\nCODE:\n') ? a.answerText.split('\n\nCODE:\n')[1] : undefined),
           language: a.language ?? undefined,
           rating: a.rating ?? undefined,
@@ -196,12 +208,16 @@ const Result: React.FC = () => {
       })
       .filter(Boolean) as Array<any>;
 
+    const safeOverallScore = transcript.length
+      ? Math.round(transcript.reduce((sum, item) => sum + Number(item.score || 0), 0) / transcript.length)
+      : overallScore;
     return {
       date: data.interview.createdAt,
-      score: overallScore,
+      score: safeOverallScore,
       feedback: summary,
       transcript,
-      overallRating: Math.round((overallScore / 100) * 5),
+      overallRating: Math.round((safeOverallScore / 100) * 5),
+      evaluationUnavailable: transcript.some((item) => String(item.feedback ?? '').includes('Evaluation unavailable')),
     };
   }, [data]);
 
@@ -217,6 +233,19 @@ const Result: React.FC = () => {
     if (score >= 80) return 'text-green-600 dark:text-green-400';
     if (score >= 50) return 'text-yellow-600 dark:text-yellow-400';
     return 'text-red-600 dark:text-red-400';
+  };
+
+  const retryEvaluation = async () => {
+    if (retryingEvaluation) return;
+    setRetryingEvaluation(true);
+    try {
+      await api.post(`/interview/${interviewId}/retry-evaluation`, {});
+      setData(await api.get<InterviewDetails>(`/interview/${interviewId}`));
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) logout();
+    } finally {
+      setRetryingEvaluation(false);
+    }
   };
 
   return (
@@ -246,10 +275,17 @@ const Result: React.FC = () => {
         </header>
 
         <section className="bg-white dark:bg-neutral-900 rounded-3xl p-6 sm:p-8 md:p-10 border border-gray-100 dark:border-neutral-800 shadow-sm mb-10 sm:mb-12 transition-colors">
-          <h2 className="text-xl sm:text-2xl font-bold mb-6 flex items-center gap-3 text-slate-900 dark:text-neutral-100">
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-xl sm:text-2xl font-bold flex items-center gap-3 text-slate-900 dark:text-neutral-100">
             <span className="bg-blue-600 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm">✓</span>
             Overall AI Feedback
           </h2>
+          {viewModel.evaluationUnavailable && (
+            <button onClick={retryEvaluation} disabled={retryingEvaluation} className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-black uppercase tracking-widest text-white disabled:opacity-60">
+              {retryingEvaluation ? 'Retrying evaluation...' : 'Retry evaluation'}
+            </button>
+          )}
+          </div>
           <div className="rounded-3xl bg-gradient-to-br from-blue-50/80 via-white to-slate-50 dark:from-neutral-900 dark:via-neutral-950 dark:to-black border border-blue-100 dark:border-neutral-800 p-5 sm:p-7">
             <FormattedFeedback text={viewModel.feedback || 'No summary yet.'} />
           </div>
@@ -261,7 +297,7 @@ const Result: React.FC = () => {
             <div key={index} className="bg-white dark:bg-neutral-900 rounded-3xl border border-slate-100 dark:border-neutral-800 shadow-sm overflow-hidden mb-8 transition-colors">
               <div className="p-5 sm:p-7 lg:p-8 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-6 lg:gap-8">
                 <div className="min-w-0">
-                  <div className="flex items-center justify-between mb-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                     <span className="text-xs font-black text-slate-400 dark:text-neutral-400 uppercase tracking-widest">Question {index + 1}</span>
                   </div>
                   <h3 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-neutral-100 mb-7 leading-tight">{item.questionText}</h3>
@@ -280,14 +316,14 @@ const Result: React.FC = () => {
                         <h4 className="text-xs font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest">
                           Your Answer
                         </h4>
-                        {item.correctedTranscript && (
+                        {item.correctedTranscript && !item.emptyAnswer && (
                           <span className="px-2 py-1 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200 text-[10px] font-black uppercase tracking-widest">
                             Cleaned transcript
                           </span>
                         )}
                       </div>
                       <div className="min-h-16 p-5 sm:p-6 bg-slate-50/50 dark:bg-neutral-950/50 rounded-2xl text-slate-600 dark:text-neutral-300 text-sm leading-relaxed border-2 border-dashed border-blue-400/40 dark:border-blue-900/40">
-                        {item.userAnswer || <span className="text-slate-400 dark:text-neutral-400">No verbal answer provided.</span>}
+                        {item.emptyAnswer ? <span className="font-bold text-amber-600 dark:text-amber-300">No answer provided</span> : item.userAnswer}
                       </div>
                     </div>
                     {item.codingAnswer && (
@@ -318,6 +354,14 @@ const Result: React.FC = () => {
                     ))}
                   </div>
                   {(() => {
+                    if (item.emptyAnswer) {
+                      return (
+                        <div className="relative z-10 rounded-2xl bg-white/70 dark:bg-neutral-950/70 border border-blue-100 dark:border-neutral-800 p-4">
+                          <h4 className="text-[10px] font-black text-slate-500 dark:text-neutral-400 uppercase tracking-widest">Communication Confidence Estimate</h4>
+                          <p className="mt-2 text-sm font-bold text-slate-500 dark:text-neutral-400">0% — no answer provided.</p>
+                        </div>
+                      );
+                    }
                     const confidence = normalizeConfidence(item.confidenceScore);
                     return (
                     <div className="relative z-10 rounded-2xl bg-white/70 dark:bg-neutral-950/70 border border-blue-100 dark:border-neutral-800 p-4">
@@ -389,7 +433,7 @@ const Result: React.FC = () => {
                       )}
                     </div>
                   )}
-                  <div className="mt-auto pt-5 border-t border-blue-100 dark:border-neutral-800 flex items-center justify-between relative z-10">
+                  <div className="mt-auto pt-5 border-t border-blue-100 dark:border-neutral-800 flex flex-wrap items-center justify-between gap-3 relative z-10">
                     <span className="text-sm font-black text-slate-400 dark:text-neutral-400 uppercase tracking-widest">Item Score</span>
                     <span className="text-3xl font-black text-blue-600 dark:text-blue-400">{item.score || 0}/100</span>
                   </div>

@@ -7,7 +7,7 @@ import { toastError, toastInfo } from "../services/toast";
 import { useAuth } from "../context/AuthContext";
 import { Icons } from "../constants";
 
-type QuestionType = "theory" | "coding" | "mcq" | "practical" | "scenario";
+type QuestionType = "theory" | "coding" | "code" | "sql" | "mcq" | "practical" | "scenario";
 type Difficulty = "easy" | "medium" | "hard";
 
 type InterviewDetailsResponse = {
@@ -15,6 +15,8 @@ type InterviewDetailsResponse = {
     id: number;
     role: string;
     experience: string;
+    personality: string;
+    followUpCount: number;
     difficulty: string | null;
     techStack: any;
     status: "IN_PROGRESS" | "COMPLETED";
@@ -35,6 +37,9 @@ type InterviewDetailsResponse = {
       answers: Array<{
         id: number;
         answerText: string;
+        followUpQuestion?: string | null;
+        followUpAnswer?: string | null;
+        interviewerReaction?: string | null;
         code: string | null;
         language: string | null;
         score: number | null;
@@ -130,6 +135,12 @@ type AudioAnswerResponse = {
   correctedTranscript?: string;
   transcriptionEngine: "whisper" | "placeholder" | null;
 };
+type FollowUpResponse = {
+  followUpNeeded: boolean;
+  reason: string;
+  interviewerReaction: string;
+  followUpQuestion: string | null;
+};
 
 type CurrentQuestion = {
   id: number;
@@ -146,6 +157,11 @@ type CurrentQuestion = {
   canRunCode?: boolean;
   options?: string[];
 };
+
+function isCodeAnswerQuestion(question: CurrentQuestion | null) {
+  if (!question) return false;
+  return question.type === "coding" || question.type === "code" || question.type === "sql" || question.type === "practical";
+}
 
 type TranscriptItem = {
   questionId: number;
@@ -186,7 +202,9 @@ function normalizeQuestionDifficulty(value: unknown): Difficulty | null {
 }
 
 function getQuestionTimerSeconds(question: CurrentQuestion | null, interviewDifficulty: Difficulty) {
-  if (!question || question.type === "theory") return THEORY_SECONDS;
+  if (!question) return THEORY_SECONDS;
+  const isRealPractical = question.type === "practical" && Boolean(question.constraints?.length && question.expectedOutput);
+  if (question.type !== "coding" && !isRealPractical) return THEORY_SECONDS;
   return CODING_SECONDS_BY_DIFFICULTY[question.difficulty ?? interviewDifficulty];
 }
 
@@ -310,6 +328,10 @@ export default function InterviewSession() {
   const [interimTranscript, setInterimTranscript] = useState("");
   const [answerText, setAnswerText] = useState("");
   const [selectedOption, setSelectedOption] = useState("");
+  const [interviewerReaction, setInterviewerReaction] = useState("");
+  const [followUpQuestion, setFollowUpQuestion] = useState<string | null>(null);
+  const [isFollowUpActive, setIsFollowUpActive] = useState(false);
+  const [isGeneratingFollowUp, setIsGeneratingFollowUp] = useState(false);
 
   const [code, setCode] = useState("");
   const [language, setLanguage] = useState("TypeScript");
@@ -339,6 +361,9 @@ export default function InterviewSession() {
   const proctoringInFlightRef = useRef(false);
   const terminatedByProctoringRef = useRef(false);
   const proctoringToastTimerRef = useRef<number | null>(null);
+  const speechCompletionRef = useRef<(() => void) | null>(null);
+  const speechSequenceRef = useRef(0);
+  const transitionIndexRef = useRef(0);
 
   useEffect(() => {
     isRecordingRef.current = isRecording;
@@ -376,12 +401,13 @@ export default function InterviewSession() {
     codeInitializedQuestionRef.current = currentQuestion.id;
     setRunCodeResult(null);
 
-    if (currentQuestion.type !== "coding") {
+    if (!isCodeAnswerQuestion(currentQuestion)) {
       setCode("");
       return;
     }
 
-    const questionLanguage = currentQuestion.language?.trim() || "TypeScript";
+    const context = `${currentQuestion.skill ?? ""} ${currentQuestion.text}`;
+    const questionLanguage = currentQuestion.language?.trim() || (/\bsql\b|query/i.test(context) ? "SQL" : /html|css|frontend|component/i.test(context) ? "HTML" : "TypeScript");
     setLanguage(questionLanguage);
     setCode((prev) =>
       codeTouchedQuestionRef.current === currentQuestion.id && prev.trim()
@@ -626,6 +652,9 @@ export default function InterviewSession() {
       if (!window.speechSynthesis) return;
       const t = text.trim();
       if (!t) return;
+      speechSequenceRef.current += 1;
+      speechCompletionRef.current?.();
+      speechCompletionRef.current = null;
       window.speechSynthesis.cancel();
       setIsQuestionSpeaking(true);
       const msg = new SpeechSynthesisUtterance(t);
@@ -647,13 +676,42 @@ export default function InterviewSession() {
     [profile?.voicePreference, voiceEnabled]
   );
 
+  const speakInterviewerTurn = useCallback((reaction: string, followUp?: string | null): Promise<void> => {
+    if (!voiceEnabled || !window.speechSynthesis) return Promise.resolve();
+    const sequence = ++speechSequenceRef.current;
+    speechCompletionRef.current?.();
+    speechCompletionRef.current = null;
+    window.speechSynthesis.cancel();
+    const voices = window.speechSynthesis.getVoices();
+    const pref = profile?.voicePreference || "female";
+    const voice = voices.find((v) => pref === "male"
+      ? /male|guy|daniel/i.test(v.name)
+      : /female|samantha|google us english/i.test(v.name)) || voices[0];
+    const speakPart = (text: string) => new Promise<void>((resolve) => {
+      speechCompletionRef.current = resolve;
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 0.95;
+      utterance.voice = voice;
+      utterance.onstart = () => setIsQuestionSpeaking(true);
+      const finish = () => { setIsQuestionSpeaking(false); speechCompletionRef.current = null; resolve(); };
+      utterance.onend = finish;
+      utterance.onerror = finish;
+      window.speechSynthesis.speak(utterance);
+    });
+    return (async () => {
+      if (reaction.trim()) await speakPart(reaction);
+      if (followUp?.trim() && sequence === speechSequenceRef.current) await speakPart(followUp);
+    })();
+  }, [profile?.voicePreference, voiceEnabled]);
+
   useEffect(() => {
     const text = currentQuestion?.text ?? "";
     if (!voiceEnabled) return;
     if (!text.trim()) return;
     if (busy) return;
+    if (isFollowUpActive) return;
     speakQuestion(text);
-  }, [busy, currentQuestion?.id, currentQuestion?.text, speakQuestion, voiceEnabled]);
+  }, [busy, currentQuestion?.id, currentQuestion?.text, isFollowUpActive, speakQuestion, voiceEnabled]);
 
   useEffect(() => {
     if (!isTimerActive) return;
@@ -935,6 +993,9 @@ export default function InterviewSession() {
         setTotalQuestions((prev) => Math.max(prev, nextNumber));
         setSavedQuestionId(null);
         setSavedAnswerId(null);
+        setInterviewerReaction("");
+        setFollowUpQuestion(null);
+        setIsFollowUpActive(false);
         setTimeLeft(getQuestionTimerSeconds(nextQuestion, difficultyOverride ?? interviewDifficulty));
         setIsTimerActive(true);
       } catch (err) {
@@ -976,6 +1037,32 @@ export default function InterviewSession() {
       });
     }
     setTranscript(answered);
+
+    const outstandingFollowUpIndex = details.interview.questions.findIndex((q) => {
+      const answer = q.answers[0];
+      return Boolean(answer?.followUpQuestion && !answer.followUpAnswer);
+    });
+    if (outstandingFollowUpIndex >= 0) {
+      const q = details.interview.questions[outstandingFollowUpIndex];
+      const a = q.answers[0];
+      const resumedQuestion: CurrentQuestion = {
+        id: q.id, text: q.questionText, type: q.type,
+        difficulty: normalizeQuestionDifficulty(q.difficulty), testCases: q.testCases,
+        skill: q.skill, language: q.language, starterCode: q.starterCode,
+        constraints: q.constraints, expectedOutput: q.expectedOutput,
+        evaluationType: q.evaluationType, canRunCode: q.canRunCode, options: q.options,
+      };
+      setCurrentQuestion(resumedQuestion);
+      setQuestionNumber(outstandingFollowUpIndex + 1);
+      setSavedQuestionId(q.id);
+      setSavedAnswerId(a.id);
+      setInterviewerReaction(a.interviewerReaction || "Okay, let's explore this a little further.");
+      setFollowUpQuestion(a.followUpQuestion || null);
+      setIsFollowUpActive(true);
+      setTimeLeft(THEORY_SECONDS);
+      setIsTimerActive(true);
+      return;
+    }
 
     const pendingIndex = details.interview.questions.findIndex((q) => q.answers.length === 0);
     const pending = pendingIndex >= 0 ? details.interview.questions[pendingIndex] : null;
@@ -1056,6 +1143,10 @@ export default function InterviewSession() {
     if (!currentQuestion) return;
     if (busy) return;
     if (submitInFlightRef.current) return;
+    if (mode === "manual" && (isQuestionSpeaking || window.speechSynthesis?.speaking)) {
+      setError("Please wait for the AI interviewer to finish speaking.");
+      return;
+    }
     submitInFlightRef.current = true;
 
     if (currentQuestion.type === "mcq" && !selectedOption && mode === "manual") {
@@ -1090,6 +1181,51 @@ export default function InterviewSession() {
     }
     setIsTimerActive(false);
     const isLastQuestion = questionNumber >= totalQuestions;
+    const nextTransition = () => {
+      if (isLastQuestion) return "Thanks. That was the final question. I'm submitting your interview for evaluation.";
+      const transitions = [
+        "Alright, let's continue.",
+        "Okay, moving ahead.",
+        "Thanks for your answer. Let's go to the next one.",
+        "Good, let's look at another question.",
+        "Understood. Here is the next question.",
+      ];
+      const transition = transitions[transitionIndexRef.current % transitions.length];
+      transitionIndexRef.current += 1;
+      return transition;
+    };
+
+    if (isFollowUpActive) {
+      const followUpAnswer = answerText.trim() || "(No verbal response)";
+      setBusy("saving");
+      setError(null);
+      try {
+        if (!savedAnswerId) throw new Error("The main answer could not be found.");
+        await api.post(`/interview/${interviewId}/follow-up-answer`, {
+          answerId: savedAnswerId,
+          followUpAnswer,
+          timeTakenSeconds: Math.max(0, THEORY_SECONDS - timeLeft),
+        });
+        setIsFollowUpActive(false);
+        setFollowUpQuestion(null);
+        setAnswerText("");
+        setInterimTranscript("");
+        if (isLastQuestion) {
+          await speakInterviewerTurn(nextTransition());
+          await completeInterview();
+        }
+        else await fetchNextQuestion(questionNumber + 1);
+      } catch (err: any) {
+        if (err instanceof ApiError && err.status === 401) logout();
+        const msg = err?.message || "Failed to save the follow-up answer.";
+        setError(msg);
+        toastError(msg);
+      } finally {
+        if (!completeRequestedRef.current) submitInFlightRef.current = false;
+        if (!completeRequestedRef.current) setBusy(null);
+      }
+      return;
+    }
 
     if (savedQuestionId === currentQuestion.id) {
       setBusy("saving");
@@ -1100,6 +1236,7 @@ export default function InterviewSession() {
           await uploadAudioAnswer(audioBlob, savedAnswerId);
         }
         if (isLastQuestion) {
+          await speakInterviewerTurn(nextTransition());
           await completeInterview();
         } else {
           await fetchNextQuestion(questionNumber + 1);
@@ -1116,13 +1253,15 @@ export default function InterviewSession() {
       return;
     }
 
-    const payload: any = { questionId: currentQuestion.id };
-    if (currentQuestion.type === "coding") {
+    const payload: any = {
+      questionId: currentQuestion.id,
+      timeTakenSeconds: Math.max(0, getQuestionTimerSeconds(currentQuestion, interviewDifficulty) - timeLeft),
+    };
+    if (isCodeAnswerQuestion(currentQuestion)) {
       const trimmedCode = code.trim();
-      const trimmedAnswer = answerText.trim();
       payload.code = trimmedCode || undefined;
       payload.language = language;
-      payload.answerText = trimmedAnswer || (mode === "auto" && !trimmedCode ? "(No code submitted)" : "");
+      payload.answerText = trimmedCode || "(No code submitted)";
     } else if (currentQuestion.type === "mcq") {
       payload.answerText = selectedOption || "(No selection)";
     } else {
@@ -1168,6 +1307,44 @@ export default function InterviewSession() {
       setCode("");
       setTimeLeft(getQuestionTimerSeconds(currentQuestion, interviewDifficulty));
 
+      const answerForFollowUp = submittedAnswerText.trim();
+      const eligibleType = currentQuestion.type === "theory" || currentQuestion.type === "scenario";
+      const words = answerForFollowUp.split(/\s+/).filter(Boolean);
+      const likelyNeedsCheck = words.length < 45 || /\b(i don'?t know|not sure|no idea|maybe|probably|something|stuff|it depends)\b/i.test(answerForFollowUp);
+      if (mode !== "auto" && timeLeft > 0 && eligibleType && likelyNeedsCheck) {
+        setIsGeneratingFollowUp(true);
+        try {
+          const decision = await api.post<FollowUpResponse>(`/interview/${interviewId}/follow-up`, {
+            questionId: currentQuestion.id,
+            answerId: answerResponse.answer.id,
+            timerExpired: false,
+          });
+          setInterviewerReaction(decision.interviewerReaction);
+          if (decision.followUpNeeded && decision.followUpQuestion) {
+            setFollowUpQuestion(decision.followUpQuestion);
+            setIsFollowUpActive(true);
+            setAnswerText("");
+            setTimeLeft(THEORY_SECONDS);
+            setIsTimerActive(true);
+            setBusy(null);
+            setIsGeneratingFollowUp(false);
+            await speakInterviewerTurn(decision.interviewerReaction, decision.followUpQuestion);
+            return;
+          }
+          await speakInterviewerTurn(nextTransition());
+        } catch {
+          const fallback = nextTransition();
+          setInterviewerReaction(fallback);
+          await speakInterviewerTurn(fallback);
+        } finally {
+          setIsGeneratingFollowUp(false);
+        }
+      } else {
+        const reaction = nextTransition();
+        setInterviewerReaction(reaction);
+        await speakInterviewerTurn(reaction);
+      }
+
       if (!isLastQuestion) {
         await fetchNextQuestion(questionNumber + 1);
       } else {
@@ -1204,6 +1381,10 @@ export default function InterviewSession() {
     totalQuestions,
     uploadAudioAnswer,
     isRecording,
+    isQuestionSpeaking,
+    isFollowUpActive,
+    speakInterviewerTurn,
+    timeLeft,
   ]);
 
   useEffect(() => {
@@ -1256,16 +1437,16 @@ export default function InterviewSession() {
           </div>
         </div>
       )}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="w-full min-w-0 max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-5 sm:py-8 overflow-x-hidden">
         {error && (
-          <div className="mb-6 rounded-2xl border border-red-100 dark:border-red-900/30 bg-red-50 dark:bg-red-900/10 px-5 py-4 flex items-center justify-between gap-4">
-            <div className="text-sm font-semibold text-red-700 dark:text-red-200">
+          <div className="mb-6 rounded-2xl border border-red-100 dark:border-red-900/30 bg-red-50 dark:bg-red-900/10 px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="min-w-0 break-words text-sm font-semibold text-red-700 dark:text-red-200">
               {error}
               {savedQuestionId && (
                 <span className="opacity-80"> (Answer may already be saved; retry to continue.)</span>
               )}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={() => submitAndNext()}
                 className="px-4 py-2 rounded-xl bg-red-600 text-white text-xs font-black uppercase"
@@ -1283,21 +1464,21 @@ export default function InterviewSession() {
         )}
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
-          <div className="flex items-center gap-3">
+          <div className="min-w-0 flex items-center gap-3">
             <div className="w-11 h-11 rounded-2xl bg-slate-900 dark:bg-neutral-800 text-white flex items-center justify-center font-black">
               AM
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 dark:text-neutral-400">
                 Interview Session
               </div>
-              <div className="text-xl font-black text-slate-900 dark:text-neutral-100 font-poppins">
+              <div className="text-lg sm:text-xl font-black text-slate-900 dark:text-neutral-100 font-poppins break-words">
                 Question {questionNumber} of {totalQuestions}
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-200 border border-blue-100 dark:border-blue-900/30">
               {currentQuestion?.type ? currentQuestion.type.charAt(0).toUpperCase() + currentQuestion.type.slice(1) : "Question"}
             </span>
@@ -1311,23 +1492,16 @@ export default function InterviewSession() {
             >
               Voice {voiceEnabled ? "On" : "Off"}
             </button>
-            <button
-              onClick={() => speakQuestion(currentQText)}
-              disabled={isRecording}
-              className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-50 dark:bg-neutral-900 text-slate-700 dark:text-neutral-200 border border-slate-100 dark:border-neutral-800 flex items-center gap-2"
-            >
-              <Icons.Replay /> Replay
-            </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <section className="bg-white dark:bg-neutral-900 rounded-[2.5rem] border border-slate-100 dark:border-neutral-800 shadow-sm p-6 sm:p-8">
-            <div className="flex items-center justify-between mb-5">
+        <div className="grid min-w-0 grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6">
+          <section className="min-w-0 bg-white dark:bg-neutral-900 rounded-[2rem] sm:rounded-[2.5rem] border border-slate-100 dark:border-neutral-800 shadow-sm p-4 sm:p-8">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
               <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-neutral-400">
                 Camera
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={() => setCameraEnabled((v) => !v)}
                   className={`px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border ${
@@ -1375,7 +1549,7 @@ export default function InterviewSession() {
             </div>
 
             <div className="mt-6 rounded-3xl border border-slate-100 dark:border-neutral-800 bg-slate-50 dark:bg-neutral-950 p-5">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-neutral-400">
                   Timer
                 </div>
@@ -1389,18 +1563,29 @@ export default function InterviewSession() {
             </div>
           </section>
 
-          <section className="bg-white dark:bg-neutral-900 rounded-[2.5rem] border border-slate-100 dark:border-neutral-800 shadow-sm p-6 sm:p-8">
-            <div className="flex items-start justify-between gap-4 mb-6">
-              <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-neutral-400">
-                Question
+          <section className="min-w-0 bg-white dark:bg-neutral-900 rounded-[2rem] sm:rounded-[2.5rem] border border-slate-100 dark:border-neutral-800 shadow-sm p-4 sm:p-8">
+            <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
+              <div className={`text-[10px] font-black uppercase tracking-widest ${isFollowUpActive ? "text-blue-600 dark:text-blue-300" : "text-slate-400 dark:text-neutral-400"}`}>
+                {isFollowUpActive ? "Follow-up" : "Question"}
               </div>
+              {isGeneratingFollowUp && <div className="inline-flex items-center gap-2 text-xs font-bold text-blue-600 dark:text-blue-300"><span className="h-3 w-3 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" /> Preparing follow-up...</div>}
+              {isQuestionSpeaking && <div className="text-xs font-bold text-emerald-600 dark:text-emerald-300">AI is speaking...</div>}
             </div>
 
-            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-neutral-100 leading-snug font-poppins">
-              {currentQText}
-            </h2>
+            <div className={isFollowUpActive ? "rounded-3xl border-2 border-blue-200 bg-blue-50/70 p-6 dark:border-blue-900/50 dark:bg-blue-950/20" : ""} aria-live="polite">
+              {isFollowUpActive && <div className="mb-3 text-sm font-semibold text-blue-700 dark:text-blue-300">Based on your previous answer:</div>}
+              <h2 className="text-xl sm:text-3xl font-black text-slate-900 dark:text-neutral-100 leading-snug font-poppins break-words">
+                {isFollowUpActive && followUpQuestion ? followUpQuestion : currentQText}
+              </h2>
+            </div>
 
-            {currentQuestion?.type === "coding" ? (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {!isFollowUpActive && <button onClick={() => speakQuestion(currentQText)} disabled={isRecording || isQuestionSpeaking} className="rounded-xl border border-slate-200 px-3 py-2 text-[10px] font-black uppercase text-slate-600 disabled:opacity-40 dark:border-neutral-700 dark:text-neutral-300">Repeat question</button>}
+              {isFollowUpActive && <button onClick={() => followUpQuestion && speakQuestion(followUpQuestion)} disabled={!followUpQuestion || isRecording || isQuestionSpeaking} className="rounded-xl border border-blue-200 px-3 py-2 text-[10px] font-black uppercase text-blue-700 disabled:opacity-40 dark:border-blue-900 dark:text-blue-300">Repeat follow-up</button>}
+              <button onClick={() => { speechSequenceRef.current += 1; window.speechSynthesis?.cancel(); speechCompletionRef.current?.(); speechCompletionRef.current = null; setIsQuestionSpeaking(false); }} disabled={!isQuestionSpeaking} className="rounded-xl border border-slate-200 px-3 py-2 text-[10px] font-black uppercase text-slate-600 disabled:opacity-40 dark:border-neutral-700 dark:text-neutral-300">Stop speaking</button>
+            </div>
+
+            {isCodeAnswerQuestion(currentQuestion) ? (
               <div className="mt-8 space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                   <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-neutral-400">
@@ -1410,15 +1595,6 @@ export default function InterviewSession() {
                     <span className="text-xs font-bold text-slate-600 dark:text-neutral-300">
                       {currentQuestion.skill ? `${currentQuestion.skill} / ` : ""}{language}
                     </span>
-                    {currentQuestion.canRunCode ? (
-                      <button
-                        onClick={handleRunCode}
-                        disabled={isRunningCode}
-                        className="px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-60"
-                      >
-                        {isRunningCode ? "Running..." : "Run Code"}
-                      </button>
-                    ) : null}
                   </div>
                 </div>
 
@@ -1475,7 +1651,7 @@ export default function InterviewSession() {
 
                 {runCodeResult && (
                   <div className="rounded-3xl border border-slate-100 dark:border-neutral-800 bg-slate-50 dark:bg-neutral-950 p-5">
-                    <div className="flex items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-neutral-400">
                         Test Results
                       </div>
@@ -1507,7 +1683,7 @@ export default function InterviewSession() {
                             key={index}
                             className="rounded-2xl border border-slate-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4"
                           >
-                            <div className="flex items-center justify-between gap-3">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
                               <div className="text-xs font-black text-slate-900 dark:text-neutral-100">
                                 Case {index + 1}
                               </div>
@@ -1554,17 +1730,6 @@ export default function InterviewSession() {
                   </div>
                 )}
 
-                <div>
-                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-neutral-400 mb-2">
-                    Explanation (optional)
-                  </div>
-                  <textarea
-                    value={answerText}
-                    onChange={(e) => setAnswerText(e.target.value)}
-                    className="w-full h-24 bg-slate-50 dark:bg-neutral-950 border border-slate-100 dark:border-neutral-800 rounded-3xl px-5 py-4 outline-none text-sm font-semibold text-slate-900 dark:text-neutral-100 resize-none"
-                    placeholder="Explain your approach, complexity, tradeoffs, and edge cases..."
-                  />
-                </div>
               </div>
             ) : currentQuestion?.type === "mcq" ? (
               <fieldset className="mt-8 space-y-3">
@@ -1674,10 +1839,10 @@ export default function InterviewSession() {
             <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-3">
               <button
                 onClick={() => submitAndNext()}
-                disabled={busy !== null || !currentQuestion}
+                disabled={busy !== null || !currentQuestion || isQuestionSpeaking}
                 className="sm:col-span-2 w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm uppercase tracking-widest disabled:opacity-60"
               >
-                {questionNumber >= totalQuestions ? "Finish Interview" : "Submit & Next"}
+                {isFollowUpActive ? "Submit Follow-up" : questionNumber >= totalQuestions ? "Finish Interview" : "Submit & Next"}
               </button>
               <button
                 onClick={handleFinishEarly}
@@ -1692,8 +1857,8 @@ export default function InterviewSession() {
 
       {showOverlay && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-6">
-          <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" />
-          <div className="relative bg-white dark:bg-neutral-900 rounded-[2.5rem] border border-slate-100 dark:border-neutral-800 shadow-2xl p-10 max-w-sm w-full text-center">
+          <div className="absolute inset-0 bg-slate-900/50" />
+          <div className="relative mx-4 w-full max-w-sm bg-white dark:bg-neutral-900 rounded-[2.5rem] border border-slate-100 dark:border-neutral-800 shadow-2xl p-6 sm:p-10 text-center">
             <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-6" />
             <div className="text-2xl font-black text-slate-900 dark:text-neutral-100 font-poppins">
               {busy === "initial"

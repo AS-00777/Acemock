@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
 import { Icons } from '../constants';
+import AppLoadingScreen from '../components/AppLoadingScreen';
 
 const Settings: React.FC = () => {
   const { profile, logout } = useAuth();
@@ -14,7 +15,7 @@ const Settings: React.FC = () => {
     navigate('/login');
   };
 
-  if (!profile) return null;
+  if (!profile) return <AppLoadingScreen />;
 
   return (
     <Layout>
@@ -96,7 +97,7 @@ const Settings: React.FC = () => {
 
         {showConfirm && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setShowConfirm(false)}></div>
+            <div className="absolute inset-0 bg-slate-900/40" onClick={() => setShowConfirm(false)}></div>
             <div className="relative bg-white dark:bg-neutral-900 rounded-[3rem] p-10 max-w-sm w-full shadow-2xl border border-slate-100 dark:border-neutral-800 animate-in zoom-in duration-300">
               <div className="w-20 h-20 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 rounded-full flex items-center justify-center mx-auto mb-6 text-3xl">
                 <Icons.LogOut />

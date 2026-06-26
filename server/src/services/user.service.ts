@@ -102,6 +102,7 @@ function mapUser(row: UserRow) {
     id: row.id,
     email: row.email,
     name: row.name,
+    clerkId: row.clerk_id ?? undefined,
   };
 }
 
@@ -194,6 +195,7 @@ export async function findOrCreateUserFromClerk(clerkUserId: string) {
       id: byEmail[0].id,
       email,
       name,
+      clerkId: clerkUserId,
     };
   }
 
@@ -206,6 +208,7 @@ export async function findOrCreateUserFromClerk(clerkUserId: string) {
     id: insert.insertId,
     email,
     name,
+    clerkId: clerkUserId,
   };
 }
 

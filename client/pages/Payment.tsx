@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
+import AppLoadingScreen from '../components/AppLoadingScreen';
 
 const Payment: React.FC = () => {
   const { profile } = useAuth();
@@ -23,7 +24,7 @@ const Payment: React.FC = () => {
     }, 2000);
   };
 
-  if (!profile) return null;
+  if (!profile) return <AppLoadingScreen />;
 
   return (
     <Layout>
@@ -198,7 +199,7 @@ const Payment: React.FC = () => {
       {/* Processing / Success Modal */}
       {(isProcessing || showSuccess) && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"></div>
+          <div className="absolute inset-0 bg-slate-900/60"></div>
           <div className="relative bg-white dark:bg-neutral-900 rounded-[3rem] p-12 max-w-sm w-full text-center shadow-2xl border border-slate-100 dark:border-neutral-800">
             {isProcessing ? (
               <>

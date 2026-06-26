@@ -6,6 +6,9 @@ import { env } from "./config/env";
 import userRoutes from "./routes/user.routes";
 import interviewRoutes from "./routes/interview.routes";
 import proctoringRoutes from "./routes/proctoring.routes";
+import aptitudeRoutes from "./routes/aptitude.routes";
+import resultRoutes from "./routes/result.routes";
+import dashboardRoutes from "./routes/dashboard.routes";
 import { errorHandler, notFound } from "./middleware/error.middleware";
 
 export const app = express();
@@ -26,7 +29,11 @@ app.get("/", (_req, res) => {
 
 app.use("/api/user", userRoutes);
 app.use("/api/interview", interviewRoutes);
+app.use("/api/interviews", interviewRoutes);
 app.use("/api/proctoring", proctoringRoutes);
+app.use("/api/aptitude", aptitudeRoutes);
+app.use("/api/results", resultRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
