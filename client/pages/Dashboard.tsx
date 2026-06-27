@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { BookOpen, Brain, ChevronLeft, ChevronRight, FileCheck, Flame, Mic, MonitorCheck, PlayCircle } from 'lucide-react';
+import { Brain, ChevronLeft, ChevronRight, FileCheck, Flame, Mic, MonitorCheck, PlayCircle } from 'lucide-react';
 import Layout from '../components/Layout';
 import BadgeIcon, { badgeIconKeys, defaultBadgeIconByCode } from '../components/BadgeIcon';
 import { Icons } from '../constants';
@@ -355,14 +355,6 @@ const Dashboard: React.FC = () => {
       action: 'Start',
       to: '/aptitude',
       icon: Brain,
-    },
-    {
-      title: 'Resource Recommendation',
-      description: 'Review prep resources',
-      status: 'Suggested',
-      action: 'Open',
-      to: '/resources/interview-questions',
-      icon: BookOpen,
     },
   ].slice(0, 3);
   const safeHistoryTotal = Number.isFinite(Number(historyTotal)) ? Number(historyTotal) : 0;

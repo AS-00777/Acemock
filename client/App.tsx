@@ -70,7 +70,6 @@ const App: FC = () => {
             <Route path="/aptitude/analytics" element={<ProtectedRoute><ComingSoon /></ProtectedRoute>} />
             <Route path="/mock-test/:mockType" element={<ProtectedRoute><AptitudeSetup /></ProtectedRoute>} />
             <Route path="/placement-patterns/:company" element={<ProtectedRoute><ComingSoon /></ProtectedRoute>} />
-            <Route path="/resources/:resource" element={<ProtectedRoute><ComingSoon /></ProtectedRoute>} />
             <Route path="/resume-builder" element={<ProtectedRoute><ComingSoon /></ProtectedRoute>} />
             <Route path="/ats-checker" element={<ProtectedRoute><ComingSoon /></ProtectedRoute>} />
             <Route path="/resume-analyzer" element={<ProtectedRoute><ResumeInterview /></ProtectedRoute>} />

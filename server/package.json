@@ -7,8 +7,7 @@
     "dev": "nodemon --watch src --ext ts --exec \"ts-node src/server.ts\"",
     "build": "tsc -p tsconfig.json",
     "start": "ts-node src/server.ts",
-    "import:aptitude": "ts-node scripts/importAptitudeDataset.ts",
-    "import:resources": "ts-node scripts/importResourceDataset.ts"
+    "import:aptitude": "ts-node scripts/importAptitudeDataset.ts"
   },
   "keywords": [],
   "author": "",
@@ -34,7 +33,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^2.1.0",
     "@types/natural": "^5.1.5",
-    "@types/node": "^25.3.0",
+    "@types/node": "^25.9.4",
     "nodemon": "^3.1.14",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"

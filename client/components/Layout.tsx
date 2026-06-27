@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { CompanyLogo, companyLogoFallbacks, companyLogos, routeCompanyToLogoKey, type CompanyLogoKey } from '../data/companyLogos';
 import AccountDropdown from './AccountDropdown';
 
-type MenuKey = 'mock' | 'aptitude' | 'resources' | 'resume';
+type MenuKey = 'mock' | 'aptitude' | 'resume';
 type MenuItem = { label: string; to: string; description?: string; badge?: string; logoKey?: CompanyLogoKey };
 type AptitudeCategory = { id: string; label: string; description: string; items: MenuItem[] };
 
@@ -104,17 +104,6 @@ const aptitudeCategories: AptitudeCategory[] = [
       { label: 'Capgemini Placement Pattern', to: '/placement-patterns/capgemini', logoKey: 'capgemini' },
     ],
   },
-];
-
-const resourceItems: MenuItem[] = [
-  { label: 'Interview Questions', to: '/resources/interview-questions' },
-  { label: 'DBMS Questions', to: '/resources/dbms' },
-  { label: 'OOP Questions', to: '/resources/oops' },
-  { label: 'Operating System Questions', to: '/resources/os' },
-  { label: 'Computer Networks Questions', to: '/resources/cn' },
-  { label: 'JavaScript Questions', to: '/resources/javascript' },
-  { label: 'React Questions', to: '/resources/react' },
-  { label: 'Python Questions', to: '/resources/python' },
 ];
 
 const resumeToolItems: MenuItem[] = [
@@ -340,7 +329,6 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [openMobileSections, setOpenMobileSections] = useState<Record<MenuKey, boolean>>({
     mock: false,
     aptitude: false,
-    resources: false,
     resume: false,
   });
   const [activeAptitudeCategoryId, setActiveAptitudeCategoryId] = useState(aptitudeCategories[0].id);
@@ -362,7 +350,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
   useEffect(() => {
     closeAllMenus();
-    setOpenMobileSections({ mock: false, aptitude: false, resources: false, resume: false });
+    setOpenMobileSections({ mock: false, aptitude: false, resume: false });
   }, [pathname, closeAllMenus]);
 
   useEffect(() => {
@@ -428,7 +416,6 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const isMenuActive = useCallback((key: MenuKey) => {
     if (key === 'mock') return pathname.startsWith('/interview') || pathname === '/resume-interview';
     if (key === 'aptitude') return pathname.startsWith('/aptitude') || pathname.startsWith('/mock-test') || pathname.startsWith('/placement-patterns');
-    if (key === 'resources') return pathname.startsWith('/resources');
     return pathname === '/resume-builder' || pathname === '/ats-checker' || pathname === '/resume-analyzer' || pathname === '/resume-interview';
   }, [pathname]);
 
@@ -686,10 +673,6 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             })}
           </MobileAccordion>
 
-          <MobileAccordion menuKey="resources" label="Resources" icon={<Icons.History />}>
-            {resourceItems.map((item) => <MobileLink key={item.to} item={item} />)}
-          </MobileAccordion>
-
           <MobileAccordion menuKey="resume" label="Resume Tools" icon={<Icons.Resume />}>
             {resumeToolItems.map((item) => <MobileLink key={item.to} item={item} />)}
           </MobileAccordion>
@@ -732,7 +715,6 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             <SimpleDesktopLink to="/" label="Home" icon={<Icons.Home />} />
             <DesktopMenuButton menuKey="mock" label="Mock Interview" icon={<Icons.Interview />} />
             <DesktopMenuButton menuKey="aptitude" label="Aptitude" icon={<PreparationIcon />} />
-            <DesktopMenuButton menuKey="resources" label="Resources" icon={<Icons.History />} />
             <DesktopMenuButton menuKey="resume" label="Resume Tools" icon={<Icons.Resume />} />
             {profile && <SimpleDesktopLink to="/dashboard" label="Dashboard" icon={<Icons.Dashboard />} />}
           </div>
@@ -818,16 +800,6 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             </div>
           </DesktopDropdown>
 
-          <DesktopDropdown menuKey="resources" className="w-[min(42rem,calc(100vw-3rem))]">
-            <div id="resources-desktop-menu" role="menu" className="grid gap-2 sm:grid-cols-2">
-              {resourceItems.map((item) => (
-                <Link key={item.to} to={item.to} onClick={closeAllMenus} className={dropdownItemClass(isRouteActive(item.to))}>
-                  <span className="font-semibold">{item.label}</span>
-                </Link>
-              ))}
-            </div>
-          </DesktopDropdown>
-
           <DesktopDropdown menuKey="resume">
             <div id="resume-desktop-menu" role="menu" className="space-y-2">
               {resumeToolItems.map((item) => (
@@ -865,7 +837,6 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           <div>
             <h4 className="mb-6 text-[10px] font-black uppercase tracking-[0.2em] text-slate-900 dark:text-neutral-100">Company</h4>
             <ul className="space-y-4 text-sm font-bold text-slate-500 dark:text-neutral-400">
-              <li><Link to="/resources/interview-questions" className="transition-colors hover:text-[#2563eb] dark:hover:text-[#60a5fa]">Resources</Link></li>
               <li><Link to="/help" className="transition-colors hover:text-[#2563eb] dark:hover:text-[#60a5fa]">Support</Link></li>
               <li><Link to="/pricing" className="transition-colors hover:text-[#2563eb] dark:hover:text-[#60a5fa]">Pricing</Link></li>
             </ul>
