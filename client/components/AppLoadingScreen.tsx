@@ -2,8 +2,6 @@ import React from "react";
 import { DotLottieReact, setWasmUrl } from "@lottiefiles/dotlottie-react";
 import loadingAnimation from "../assets/Loading.lottie";
 
-
-
 type AppLoadingScreenProps = {
   isExiting?: boolean;
 };
