@@ -25,7 +25,7 @@ router.get("/badges", async (req: AuthRequest, res: Response, next: NextFunction
     const userId = req.user.clerkId ?? String(req.user.id);
 
     await backfillUserActivitiesFromCompletedData(userId);
-    await checkAndAwardBadges(userId);
+    const awardResult = await checkAndAwardBadges(userId);
 
     const [earnedBadges, lockedBadges, allBadges, currentStreak, nextBadge] = await Promise.all([
       getUserBadges(userId),
@@ -43,6 +43,7 @@ router.get("/badges", async (req: AuthRequest, res: Response, next: NextFunction
       totalBadges: allBadges.length,
       currentStreak,
       nextBadge,
+      newlyAwardedBadges: awardResult.newlyAwardedBadges,
     });
   } catch (error) {
     next(error);

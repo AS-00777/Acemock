@@ -21,6 +21,8 @@ import AptitudeSetup from './pages/AptitudeSetup';
 import AptitudeQuiz from './pages/AptitudeQuiz';
 import AptitudeResult from './pages/AptitudeResult';
 import ComingSoon from './pages/ComingSoon';
+import AtsChecker from './pages/AtsChecker';
+import ResumeJdAnalyzer from './pages/ResumeJdAnalyzer';
 
 const clerkPublishableKey = process.env.REACT_APP_CLERK_PUBLISHABLE_KEY;
 
@@ -71,8 +73,9 @@ const App: FC = () => {
             <Route path="/mock-test/:mockType" element={<ProtectedRoute><AptitudeSetup /></ProtectedRoute>} />
             <Route path="/placement-patterns/:company" element={<ProtectedRoute><ComingSoon /></ProtectedRoute>} />
             <Route path="/resume-builder" element={<ProtectedRoute><ComingSoon /></ProtectedRoute>} />
-            <Route path="/ats-checker" element={<ProtectedRoute><ComingSoon /></ProtectedRoute>} />
-            <Route path="/resume-analyzer" element={<ProtectedRoute><ResumeInterview /></ProtectedRoute>} />
+            <Route path="/ats-checker" element={<ProtectedRoute><AtsChecker /></ProtectedRoute>} />
+            <Route path="/resume-jd-analyzer" element={<ProtectedRoute><ResumeJdAnalyzer /></ProtectedRoute>} />
+            <Route path="/resume-analyzer" element={<Navigate to="/resume-jd-analyzer" />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </Router>

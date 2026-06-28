@@ -12,6 +12,7 @@ type AptitudeCategory = { id: string; label: string; description: string; items:
 const mockInterviewItems: MenuItem[] = [
   { label: 'Technical Interview', to: '/interview-form?type=technical', description: 'Role-based technical practice' },
   { label: 'HR Interview', to: '/interview-form?type=hr', description: 'Behavioral and culture fit rounds' },
+  { label: 'Resume Based Interview', to: '/resume-interview', description: 'Generate an interview from your resume' },
   { label: 'Spoken English Practice', to: '/interview-form?type=spoken-english', description: 'Fluency and confidence drills' },
 ];
 
@@ -109,7 +110,7 @@ const aptitudeCategories: AptitudeCategory[] = [
 const resumeToolItems: MenuItem[] = [
   { label: 'Resume Builder', to: '/resume-builder', description: 'Create polished, ATS-ready resumes' },
   { label: 'ATS Score Checker', to: '/ats-checker', description: 'Find parsing and keyword gaps' },
-  { label: 'Resume vs Job Description Analyzer', to: '/resume-analyzer', description: 'Compare your resume against a role' },
+  { label: 'Resume vs Job Description Analyzer', to: '/resume-jd-analyzer', description: 'Compare your resume against a role' },
 ];
 
 const ChevronIcon = ({ open }: { open?: boolean }) => (
@@ -416,7 +417,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const isMenuActive = useCallback((key: MenuKey) => {
     if (key === 'mock') return pathname.startsWith('/interview') || pathname === '/resume-interview';
     if (key === 'aptitude') return pathname.startsWith('/aptitude') || pathname.startsWith('/mock-test') || pathname.startsWith('/placement-patterns');
-    return pathname === '/resume-builder' || pathname === '/ats-checker' || pathname === '/resume-analyzer' || pathname === '/resume-interview';
+    return pathname === '/resume-builder' || pathname === '/ats-checker' || pathname === '/resume-jd-analyzer' || pathname === '/resume-analyzer';
   }, [pathname]);
 
   const openMenuWithHover = (key: MenuKey) => {

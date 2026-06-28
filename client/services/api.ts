@@ -16,6 +16,17 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function buildApiUrl(path: string) {
+  const base = API_BASE_URL.replace(/\/+$/, "");
+  const normalizedPath =
+    base.endsWith("/api") && path.startsWith("/api/")
+      ? path.slice(4)
+      : path.startsWith("/")
+        ? path
+        : `/${path}`;
+  return `${base}${normalizedPath}`;
+}
+
 export class ApiError extends Error {
   status: number;
   details?: unknown;
@@ -40,7 +51,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
     try {
       if (IS_DEV) console.debug("[api] request", { path, attempt });
-      const res = await fetch(`${API_BASE_URL}${path}`, {
+      const res = await fetch(buildApiUrl(path), {
         ...init,
         headers,
       });

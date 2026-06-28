@@ -21,6 +21,12 @@ type UserBadgeRow = BadgeRow & {
   earned_at: Date;
 };
 
+export type NewlyAwardedBadge = UserBadgeRow;
+
+export type BadgeAwardResult = {
+  newlyAwardedBadges: NewlyAwardedBadge[];
+};
+
 type BadgeStats = {
   totalInterviews: number;
   bestInterviewScore: number;
@@ -42,6 +48,13 @@ type CompletedInterviewActivityRow = RowDataPacket & {
   activity_date: Date | string;
 };
 
+type CompletedAptitudeActivityRow = RowDataPacket & {
+  id: number;
+  title: string | null;
+  section: string | null;
+  activity_date: Date | string;
+};
+
 export type NextBadgeProgress = {
   code: string;
   name: string;
@@ -56,6 +69,7 @@ export type NextBadgeProgress = {
 export type ActivityCalendarDay = {
   date: string;
   count: number;
+  totalActivityCount: number;
   interviewCount: number;
   aptitudeCount: number;
   technicalMcqCount: number;
@@ -113,16 +127,41 @@ const badgeProgress: Record<string, (stats: BadgeStats) => { current: number; ta
 };
 
 const aptitudeBadgeCodes = ["FIRST_APTITUDE", "SCORE_90_APTITUDE"];
+const technicalAptitudeSections = new Set(["React Engineer", "DevOps Engineer", "AI & ML", "SAP Engineer"]);
 
 function isMissingTableError(error: unknown) {
   const code = (error as { code?: string })?.code;
   return code === "ER_NO_SUCH_TABLE" || code === "ER_BAD_FIELD_ERROR";
 }
 
-function toDateOnly(value: Date | string | undefined) {
-  if (!value) return new Date().toISOString().slice(0, 10);
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
+function formatLocalDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function toDateOnly(value: Date | string) {
+  if (value instanceof Date) return formatLocalDateKey(value);
   return String(value).slice(0, 10);
+}
+
+function parseDateKey(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function addDaysToDateKey(value: string, amount: number) {
+  const date = parseDateKey(value);
+  date.setDate(date.getDate() + amount);
+  return formatLocalDateKey(date);
+}
+
+async function getDatabaseDateKey() {
+  const rows = await query<(RowDataPacket & { value: string })[]>(
+    "SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS value"
+  );
+  return rows[0]?.value ?? formatLocalDateKey(new Date());
 }
 
 async function safeNumber(sql: string, params: unknown[] = []) {
@@ -173,7 +212,7 @@ async function getCompletedInterviewDateExpression() {
     if (await columnExists("interviews", column)) existing.push(`i.${column}`);
   }
   if (await columnExists("results", "created_at")) existing.push("r.created_at");
-  return `DATE(COALESCE(${existing.length ? existing.join(", ") : "NOW()"}))`;
+  return `DATE_FORMAT(DATE(COALESCE(${existing.length ? existing.join(", ") : "NOW()"})), '%Y-%m-%d')`;
 }
 
 function completedInterviewWhere(alias = "i") {
@@ -193,6 +232,10 @@ function completedAptitudeWhere(alias = "at") {
       WHERE aa.test_id = ${alias}.id
       LIMIT 1
     )`;
+}
+
+function isTechnicalAptitudeActivity(row: Pick<CompletedAptitudeActivityRow, "title" | "section">) {
+  return technicalAptitudeSections.has(row.section || "") || /technical|mcq/i.test(row.title || "");
 }
 
 async function syncInterviewDailyActivityFromEvents(userId: string | number) {
@@ -227,7 +270,7 @@ export async function recordDailyActivity(
   options: RecordDailyActivityOptions = {}
 ) {
   const column = activityColumns[activityType];
-  const activityDate = toDateOnly(options.activityDate);
+  const activityDate = options.activityDate ? toDateOnly(options.activityDate) : await getDatabaseDateKey();
   const hasSource = Boolean(options.sourceType && options.sourceId !== undefined && options.sourceId !== null);
 
   if (hasSource) {
@@ -235,20 +278,32 @@ export async function recordDailyActivity(
       const connection = await pool.getConnection();
       try {
         await connection.beginTransaction();
-        const [eventResult] = await connection.execute<any>(
-          `INSERT IGNORE INTO user_activity_events
-             (user_id, activity_type, source_type, source_id, activity_date)
-           VALUES (?, ?, ?, ?, ?)`,
+        const sourceType = String(options.sourceType);
+        const sourceId = String(options.sourceId);
+        const [existingEvents] = await connection.execute<(RowDataPacket & { activity_date: string })[]>(
+          `SELECT DATE_FORMAT(activity_date, '%Y-%m-%d') AS activity_date
+           FROM user_activity_events
+           WHERE user_id = ? AND activity_type = ? AND source_type = ? AND source_id = ?
+           LIMIT 1
+           FOR UPDATE`,
           [
             String(userId),
             activityType,
-            String(options.sourceType),
-            String(options.sourceId),
-            activityDate,
+            sourceType,
+            sourceId,
           ]
         );
 
-        if (Number(eventResult.affectedRows ?? 0) > 0) {
+        const previousDate = existingEvents[0]?.activity_date ?? null;
+
+        if (!previousDate) {
+          await connection.execute(
+            `INSERT INTO user_activity_events
+               (user_id, activity_type, source_type, source_id, activity_date)
+             VALUES (?, ?, ?, ?, ?)`,
+            [String(userId), activityType, sourceType, sourceId, activityDate]
+          );
+
           await connection.execute(
             `INSERT INTO user_daily_activity (user_id, activity_date, ${column}, total_activity_count)
              VALUES (?, ?, 1, 1)
@@ -257,10 +312,42 @@ export async function recordDailyActivity(
                total_activity_count = total_activity_count + 1`,
             [String(userId), activityDate]
           );
+
+          await connection.commit();
+          return true;
+        }
+
+        if (previousDate !== activityDate) {
+          await connection.execute(
+            `UPDATE user_activity_events
+             SET activity_date = ?
+             WHERE user_id = ? AND activity_type = ? AND source_type = ? AND source_id = ?`,
+            [activityDate, String(userId), activityType, sourceType, sourceId]
+          );
+
+          await connection.execute(
+            `UPDATE user_daily_activity
+             SET ${column} = GREATEST(${column} - 1, 0),
+                 total_activity_count = GREATEST(total_activity_count - 1, 0)
+             WHERE user_id = ? AND activity_date = ?`,
+            [String(userId), previousDate]
+          );
+
+          await connection.execute(
+            `INSERT INTO user_daily_activity (user_id, activity_date, ${column}, total_activity_count)
+             VALUES (?, ?, 1, 1)
+             ON DUPLICATE KEY UPDATE
+               ${column} = ${column} + 1,
+               total_activity_count = total_activity_count + 1`,
+            [String(userId), activityDate]
+          );
+
+          await connection.commit();
+          return true;
         }
 
         await connection.commit();
-        return Number(eventResult.affectedRows ?? 0) > 0;
+        return false;
       } catch (error) {
         await connection.rollback();
         throw error;
@@ -309,6 +396,34 @@ export async function backfillUserActivitiesFromCompletedData(userId: string | n
     }
 
     await syncInterviewDailyActivityFromEvents(userId);
+
+    const aptitudeRows = await query<CompletedAptitudeActivityRow[]>(
+      `SELECT at.id,
+              at.title,
+              at.section,
+              DATE_FORMAT(DATE(COALESCE(at.completed_at, at.updated_at, at.created_at)), '%Y-%m-%d') AS activity_date
+       FROM aptitude_tests at
+       WHERE at.user_id = ?
+         AND LOWER(COALESCE(at.status, '')) IN ('completed', 'submitted', 'finished')
+         AND at.completed_at IS NOT NULL
+         AND at.score IS NOT NULL
+         AND EXISTS (
+           SELECT 1
+           FROM aptitude_attempts aa
+           WHERE aa.test_id = at.id
+           LIMIT 1
+         )`,
+      [internalUserId]
+    );
+
+    for (const row of aptitudeRows) {
+      const activityType: ActivityType = isTechnicalAptitudeActivity(row) ? "technical_mcq" : "aptitude";
+      await recordDailyActivity(userId, activityType, {
+        sourceType: activityType === "technical_mcq" ? "technical_mcq_test" : "aptitude_test",
+        sourceId: row.id,
+        activityDate: row.activity_date,
+      });
+    }
   } catch (error) {
     if (isMissingTableError(error)) return;
     throw error;
@@ -318,7 +433,7 @@ export async function backfillUserActivitiesFromCompletedData(userId: string | n
 export async function getCurrentStreak(userId: string | number) {
   try {
     const rows = await query<(RowDataPacket & { activity_date: Date | string })[]>(
-      `SELECT activity_date
+      `SELECT DATE_FORMAT(activity_date, '%Y-%m-%d') AS activity_date
        FROM user_daily_activity
        WHERE user_id = ? AND total_activity_count > 0
        ORDER BY activity_date DESC`,
@@ -328,15 +443,13 @@ export async function getCurrentStreak(userId: string | number) {
     let streak = 0;
     let expected: string | null = null;
     for (const row of rows) {
-      const date = new Date(row.activity_date);
-      const yyyyMmDd = date.toISOString().slice(0, 10);
+      const yyyyMmDd = String(row.activity_date);
       if (expected === null) {
         expected = yyyyMmDd;
       }
       if (yyyyMmDd !== expected) break;
       streak += 1;
-      date.setUTCDate(date.getUTCDate() - 1);
-      expected = date.toISOString().slice(0, 10);
+      expected = addDaysToDateKey(yyyyMmDd, -1);
     }
     return streak;
   } catch (error) {
@@ -345,21 +458,10 @@ export async function getCurrentStreak(userId: string | number) {
   }
 }
 
-function addDays(date: Date, amount: number) {
-  const next = new Date(date);
-  next.setUTCDate(next.getUTCDate() + amount);
-  return next;
-}
-
-function startOfUtcDay(date: Date) {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-}
-
 export async function getActivityCalendar(userId: string | number): Promise<ActivityCalendar> {
   try {
-    const today = startOfUtcDay(new Date());
-    const start = addDays(today, -364);
-    const startDate = toDateOnly(start);
+    const today = await getDatabaseDateKey();
+    const startDate = addDaysToDateKey(today, -364);
 
     const rows = await query<(RowDataPacket & {
       activity_date: Date | string;
@@ -370,7 +472,8 @@ export async function getActivityCalendar(userId: string | number): Promise<Acti
       spoken_practice_count: number | string | null;
       total_activity_count: number | string | null;
     })[]>(
-      `SELECT activity_date, interview_count, aptitude_count, technical_mcq_count,
+      `SELECT DATE_FORMAT(activity_date, '%Y-%m-%d') AS activity_date,
+              interview_count, aptitude_count, technical_mcq_count,
               resume_scan_count, spoken_practice_count, total_activity_count
        FROM user_daily_activity
        WHERE user_id = ? AND activity_date >= ?
@@ -381,9 +484,11 @@ export async function getActivityCalendar(userId: string | number): Promise<Acti
     const byDate = new Map<string, ActivityCalendarDay>();
     for (const row of rows) {
       const date = toDateOnly(row.activity_date);
+      const totalActivityCount = Number(row.total_activity_count ?? 0);
       byDate.set(date, {
         date,
-        count: Number(row.total_activity_count ?? 0),
+        count: totalActivityCount,
+        totalActivityCount,
         interviewCount: Number(row.interview_count ?? 0),
         aptitudeCount: Number(row.aptitude_count ?? 0),
         technicalMcqCount: Number(row.technical_mcq_count ?? 0),
@@ -394,10 +499,11 @@ export async function getActivityCalendar(userId: string | number): Promise<Acti
 
     const days: ActivityCalendarDay[] = [];
     for (let offset = 0; offset < 365; offset += 1) {
-      const date = toDateOnly(addDays(start, offset));
+      const date = addDaysToDateKey(startDate, offset);
       days.push(byDate.get(date) ?? {
         date,
         count: 0,
+        totalActivityCount: 0,
         interviewCount: 0,
         aptitudeCount: 0,
         technicalMcqCount: 0,
@@ -431,11 +537,12 @@ export async function getActivityCalendar(userId: string | number): Promise<Acti
     };
   } catch (error) {
     if (isMissingTableError(error)) {
-      const today = startOfUtcDay(new Date());
-      const start = addDays(today, -364);
+      const today = formatLocalDateKey(new Date());
+      const startDate = addDaysToDateKey(today, -364);
       const days = Array.from({ length: 365 }, (_, index) => ({
-        date: toDateOnly(addDays(start, index)),
+        date: addDaysToDateKey(startDate, index),
         count: 0,
+        totalActivityCount: 0,
         interviewCount: 0,
         aptitudeCount: 0,
         technicalMcqCount: 0,
@@ -608,19 +715,39 @@ async function removeInvalidAptitudeBadges(userId: string | number, stats: Badge
 
 export async function awardBadgeIfNotExists(userId: string | number, badgeCode: string) {
   try {
-    await exec(
+    const result = await exec(
       "INSERT IGNORE INTO user_badges (user_id, badge_code) VALUES (?, ?)",
       [String(userId), badgeCode]
     );
+    return result.affectedRows > 0;
   } catch (error) {
-    if (isMissingTableError(error)) return;
+    if (isMissingTableError(error)) return false;
     throw error;
   }
 }
 
-export async function checkAndAwardBadges(userId: string | number) {
+async function getAwardedBadgeDetails(userId: string | number, badgeCodes: string[]) {
+  if (badgeCodes.length === 0) return [];
+
+  try {
+    const placeholders = badgeCodes.map(() => "?").join(", ");
+    return query<UserBadgeRow[]>(
+      `SELECT b.code, b.name, b.description, b.icon, b.category, b.target_value, ub.earned_at
+       FROM user_badges ub
+       JOIN badges b ON b.code = ub.badge_code
+       WHERE ub.user_id = ? AND b.code IN (${placeholders})
+       ORDER BY ub.earned_at DESC`,
+      [String(userId), ...badgeCodes]
+    );
+  } catch (error) {
+    if (isMissingTableError(error)) return [];
+    throw error;
+  }
+}
+
+export async function checkAndAwardBadges(userId: string | number): Promise<BadgeAwardResult> {
   const stats = await getUserBadgeStats(userId);
-  const earned: string[] = [];
+  const newlyAwardedCodes: string[] = [];
 
   try {
     await removeInvalidAptitudeBadges(userId, stats);
@@ -645,11 +772,13 @@ export async function checkAndAwardBadges(userId: string | number) {
 
   for (const [code, shouldAward] of checks) {
     if (!shouldAward) continue;
-    await awardBadgeIfNotExists(userId, code);
-    earned.push(code);
+    const wasAwarded = await awardBadgeIfNotExists(userId, code);
+    if (wasAwarded) newlyAwardedCodes.push(code);
   }
 
-  return earned;
+  return {
+    newlyAwardedBadges: await getAwardedBadgeDetails(userId, newlyAwardedCodes),
+  };
 }
 
 function canShowNextBadge(code: string, stats: BadgeStats) {

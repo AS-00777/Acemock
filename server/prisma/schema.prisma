@@ -25,6 +25,7 @@ model User {
   banReason String? @map("ban_reason") @db.Text
 
   interviews Interview[]
+  resumes    Resume[]
 
   @@map("users")
 }
@@ -39,15 +40,37 @@ model Interview {
   status     InterviewStatus @default(IN_PROGRESS)
   warningCount Int          @default(0) @map("warning_count")
   followUpCount Int         @default(0) @map("follow_up_count")
+  interviewSource String?   @default("MOCK_FORM") @map("interview_source")
+  resumeId   Int?           @map("resume_id")
   createdAt  DateTime       @default(now()) @map("created_at")
   completedAt DateTime?     @map("completed_at")
 
   user       User           @relation(fields: [userId], references: [id])
+  resume     Resume?        @relation(fields: [resumeId], references: [id])
   questions  Question[]
   result     Result?
 
   @@index([userId])
+  @@index([interviewSource])
+  @@index([resumeId])
   @@map("interviews")
+}
+
+model Resume {
+  id               Int      @id @default(autoincrement())
+  userId           Int      @map("user_id")
+  fileName         String   @map("file_name")
+  extractedText    String   @map("extracted_text") @db.MediumText
+  parsedProfile    Json     @map("parsed_profile")
+  documentType     String   @map("document_type")
+  validationStatus String   @map("validation_status")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  user       User        @relation(fields: [userId], references: [id])
+  interviews Interview[]
+
+  @@index([userId])
+  @@map("resumes")
 }
 
 model Question {

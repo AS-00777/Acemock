@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Brain, ChevronLeft, ChevronRight, FileCheck, Flame, Mic, MonitorCheck, PlayCircle } from 'lucide-react';
 import Layout from '../components/Layout';
 import BadgeIcon, { badgeIconKeys, defaultBadgeIconByCode } from '../components/BadgeIcon';
+import AchievementUnlockedModal from '../components/AchievementUnlockedModal';
 import { Icons } from '../constants';
 import { useAuth } from '../context/AuthContext';
 import { api, ApiError } from '../services/api';
@@ -52,11 +53,13 @@ type BadgeDashboardResponse = {
   totalBadges?: number;
   currentStreak: number;
   nextBadge: NextBadge;
+  newlyAwardedBadges?: EarnedBadge[];
 };
 
 type ActivityDay = {
   date: string;
   count: number;
+  totalActivityCount?: number;
   interviewCount: number;
   aptitudeCount: number;
   technicalMcqCount: number;
@@ -120,6 +123,7 @@ type AptitudeHistoryItem = {
 };
 
 type DashboardTab = 'recent' | 'interviews' | 'aptitude' | 'technical' | 'resume';
+type InterviewFilter = 'all' | 'mock' | 'resume';
 
 type FocusTask = {
   title: string;
@@ -167,6 +171,13 @@ const technicalAptitudeSections = new Set(['React Engineer', 'DevOps Engineer', 
 const isTechnicalAptitudeItem = (item: Pick<AptitudeHistoryItem, 'title' | 'section'>) => {
   return technicalAptitudeSections.has(item.section || '') || /technical|mcq/i.test(item.title || '');
 };
+
+const getInterviewSource = (item: any) => {
+  const raw = item?.interviewSource ?? item?.interview_source ?? item?.techStack?.interview_source ?? item?.techStack?.source;
+  return String(raw || 'MOCK_FORM').toUpperCase() === 'RESUME' ? 'RESUME' : 'MOCK_FORM';
+};
+
+const getInterviewSourceLabel = (item: any) => getInterviewSource(item) === 'RESUME' ? 'Resume Interview' : 'Mock Interview';
 
 const badgeIconFor = (badge: Pick<BadgeShowcaseItem, 'code' | 'icon'>) => {
   if (badge.icon && badgeIconKeys.has(badge.icon)) return badge.icon;
@@ -253,8 +264,12 @@ const Dashboard: React.FC = () => {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<DashboardTab>('recent');
+  const [interviewFilter, setInterviewFilter] = useState<InterviewFilter>('all');
   const [badgeIndex, setBadgeIndex] = useState(0);
   const [selectedBadgeCode, setSelectedBadgeCode] = useState<string | null>(null);
+  const [activeAchievement, setActiveAchievement] = useState<EarnedBadge | null>(null);
+  const [toastBadge, setToastBadge] = useState<EarnedBadge | null>(null);
+  const [newBadgeCodes, setNewBadgeCodes] = useState<Set<string>>(() => new Set());
   const [badgeData, setBadgeData] = useState<BadgeDashboardResponse>({
     earnedBadges: [],
     lockedBadges: [],
@@ -263,12 +278,69 @@ const Dashboard: React.FC = () => {
     totalBadges: 0,
     currentStreak: 0,
     nextBadge: null,
+    newlyAwardedBadges: [],
   });
   const [activityCalendar, setActivityCalendar] = useState<ActivityCalendarResponse>(emptyCalendar);
   const [careerReadiness, setCareerReadiness] = useState<CareerReadinessResponse>(emptyReadiness);
   const navigate = useNavigate();
   const pageSize = useResponsivePageSize();
   const visibleBadgeCount = useResponsiveBadgeCount();
+  const badgeCardRef = useRef<HTMLDivElement | null>(null);
+
+  const prefersReducedMotion = () =>
+    typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const scrollToBadgeCard = () => {
+    badgeCardRef.current?.scrollIntoView({
+      behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+      block: 'center',
+    });
+    badgeCardRef.current?.focus({ preventScroll: true });
+  };
+
+  const handleViewAchievementBadges = () => {
+    setActiveAchievement(null);
+    setToastBadge(null);
+    scrollToBadgeCard();
+  };
+
+  const handleBadgeAchievements = (badges: BadgeDashboardResponse) => {
+    if (typeof window === 'undefined' || !profile?.id) return;
+
+    const earned = Array.isArray(badges?.earnedBadges) ? badges.earnedBadges : [];
+    if (earned.length === 0) return;
+
+    const storageKey = `acemock_seen_badges_${profile.id}`;
+    const storedValue = window.localStorage.getItem(storageKey);
+    let seenCodes = new Set<string>();
+
+    if (storedValue) {
+      try {
+        const parsed = JSON.parse(storedValue);
+        if (Array.isArray(parsed)) seenCodes = new Set(parsed.filter((code): code is string => typeof code === 'string'));
+      } catch {
+        seenCodes = new Set();
+      }
+    }
+
+    const newlyAwarded = Array.isArray(badges?.newlyAwardedBadges) ? badges.newlyAwardedBadges : [];
+    const newlyAwardedCodes = new Set(newlyAwarded.map((badge) => badge.code));
+    const badgesToShow =
+      storedValue === null
+        ? earned.filter((badge) => newlyAwardedCodes.has(badge.code))
+        : earned.filter((badge) => !seenCodes.has(badge.code));
+
+    if (badgesToShow.length > 0) {
+      const latestBadge = badgesToShow[0];
+      setActiveAchievement(latestBadge);
+      setToastBadge(latestBadge);
+      setSelectedBadgeCode(latestBadge.code);
+      setNewBadgeCodes(new Set(badgesToShow.map((badge) => badge.code)));
+    }
+
+    const allSeenCodes = new Set([...seenCodes, ...earned.map((badge) => badge.code)]);
+    window.localStorage.setItem(storageKey, JSON.stringify(Array.from(allSeenCodes)));
+  };
 
   useEffect(() => {
     if (!profile) return;
@@ -306,7 +378,10 @@ const Dashboard: React.FC = () => {
         setRecentItems(Array.isArray(recent.items) ? recent.items : []);
         if (aptitude) setAptitudeHistory(Array.isArray(aptitude.items) ? aptitude.items : []);
         setHistoryTotal(Number(data.total ?? 0));
-        if (badges) setBadgeData(badges);
+        if (badges) {
+          setBadgeData(badges);
+          handleBadgeAchievements(badges);
+        }
         if (calendar) setActivityCalendar({ ...emptyCalendar, ...calendar, days: Array.isArray(calendar.days) ? calendar.days : [] });
         if (readiness) setCareerReadiness({ ...emptyReadiness, ...readiness });
       } catch (err) {
@@ -319,6 +394,58 @@ const Dashboard: React.FC = () => {
 
     fetchData();
   }, [profile, navigate, logout, historyPage, pageSize]);
+
+  useEffect(() => {
+    if (!activeAchievement) return;
+    const timeoutId = window.setTimeout(() => setActiveAchievement(null), 5000);
+    return () => window.clearTimeout(timeoutId);
+  }, [activeAchievement]);
+
+  useEffect(() => {
+    if (!toastBadge) return;
+    const timeoutId = window.setTimeout(() => setToastBadge(null), 4000);
+    return () => window.clearTimeout(timeoutId);
+  }, [toastBadge]);
+
+  useEffect(() => {
+    if (newBadgeCodes.size === 0) return;
+    const timeoutId = window.setTimeout(() => setNewBadgeCodes(new Set()), 3000);
+    return () => window.clearTimeout(timeoutId);
+  }, [newBadgeCodes]);
+
+  useEffect(() => {
+    if (!activeAchievement || prefersReducedMotion()) return;
+
+    let cancelled = false;
+    import('canvas-confetti')
+      .then(({ default: confetti }) => {
+        if (cancelled) return;
+        confetti({
+          particleCount: 45,
+          spread: 58,
+          startVelocity: 34,
+          ticks: 120,
+          origin: { y: 0.62 },
+          colors: ['#2563eb', '#60a5fa', '#f59e0b'],
+        });
+        window.setTimeout(() => {
+          if (cancelled) return;
+          confetti({
+            particleCount: 28,
+            spread: 72,
+            startVelocity: 28,
+            ticks: 100,
+            origin: { y: 0.58 },
+            colors: ['#2563eb', '#93c5fd', '#fbbf24'],
+          });
+        }, 350);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeAchievement]);
 
   const safeSessions = Array.isArray(sessions) ? sessions : [];
   const safeRecentItems = Array.isArray(recentItems) ? recentItems : [];
@@ -358,6 +485,12 @@ const Dashboard: React.FC = () => {
     },
   ].slice(0, 3);
   const safeHistoryTotal = Number.isFinite(Number(historyTotal)) ? Number(historyTotal) : 0;
+  const filteredSessions = safeSessions.filter((item) => {
+    const source = getInterviewSource(item);
+    if (interviewFilter === 'resume') return source === 'RESUME';
+    if (interviewFilter === 'mock') return source !== 'RESUME';
+    return true;
+  });
   const earnedBadges = Array.isArray(badgeData?.earnedBadges) ? badgeData.earnedBadges : [];
   const allBadges = Array.isArray(badgeData?.allBadges) ? badgeData.allBadges : [];
   const lockedBadges = Array.isArray(badgeData?.lockedBadges)
@@ -373,7 +506,12 @@ const Dashboard: React.FC = () => {
   const selectedBadge = badgeShowcase.find((badge) => badge.code === selectedBadgeCode) ?? badgeShowcase[badgeIndex] ?? badgeShowcase[0] ?? null;
   const visibleBadges = badgeShowcase.slice(badgeIndex, badgeIndex + visibleBadgeCount);
   const calendarDays = Array.isArray(activityCalendar?.days) ? activityCalendar.days : [];
-  const currentStreak = careerReadiness?.currentStreak ?? activityCalendar?.currentStreak ?? badgeData?.currentStreak ?? profile?.streakCount ?? 0;
+  const currentStreak = Math.max(
+    Number(careerReadiness?.currentStreak ?? 0),
+    Number(activityCalendar?.currentStreak ?? 0),
+    Number(badgeData?.currentStreak ?? 0),
+    Number(profile?.streakCount ?? 0)
+  );
   const totalPages = Math.max(1, Math.ceil(safeHistoryTotal / pageSize));
   const pageStart = safeHistoryTotal === 0 ? 0 : (historyPage - 1) * pageSize + 1;
   const pageEnd = Math.min(historyPage * pageSize, safeHistoryTotal);
@@ -404,7 +542,7 @@ const Dashboard: React.FC = () => {
 
     const getRollingMonthDays = () => {
       const today = new Date();
-      const endDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0);
       const startDate = new Date(endDate.getFullYear(), endDate.getMonth() - 8, 1);
       const days: Date[] = [];
       for (let cursor = new Date(startDate); cursor <= endDate; cursor = addDays(cursor, 1)) {
@@ -541,6 +679,9 @@ const Dashboard: React.FC = () => {
               <h4 className="mb-7 text-xl font-bold capitalize text-slate-900 sm:text-2xl dark:text-neutral-100">
                 {(s?.techStack && (s.techStack.difficulty || s.techStack.level)) ? (s.techStack.difficulty || s.techStack.level) : 'Mock'} Session
               </h4>
+              <div className="mb-5 inline-flex w-fit rounded-full bg-slate-100 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-slate-600 dark:bg-neutral-800 dark:text-neutral-300">
+                {getInterviewSourceLabel(s)}
+              </div>
 
               <div className="mb-7 grid grid-cols-2 gap-4">
                 <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4 transition-colors group-hover:bg-white sm:p-5 dark:border-neutral-800 dark:bg-neutral-950 dark:group-hover:bg-neutral-900">
@@ -630,7 +771,7 @@ const Dashboard: React.FC = () => {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="mb-1 flex items-start justify-between gap-2">
-                    <p className="line-clamp-2 min-w-0 text-sm font-black leading-tight text-slate-900 dark:text-neutral-100">{task.title}</p>
+                    <p className="min-w-0 break-words text-sm font-black leading-tight text-slate-900 dark:text-neutral-100">{task.title}</p>
                     <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[7px] font-black uppercase tracking-widest ${focusStatusClass(task.status)}`}>
                       {task.status}
                     </span>
@@ -789,7 +930,7 @@ const Dashboard: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex h-full rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900 sm:p-5">
+              <div ref={badgeCardRef} tabIndex={-1} className="flex h-full rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm outline-none dark:border-neutral-800 dark:bg-neutral-900 sm:p-5">
                 <div className="flex min-h-full w-full flex-col justify-between gap-4">
                 <div className="flex min-h-[50px] items-start justify-between gap-4">
                   <div>
@@ -807,13 +948,20 @@ const Dashboard: React.FC = () => {
 
                 {badgeShowcase.length > 0 ? (
                   <div className="grid min-h-[94px] items-center gap-3" style={{ gridTemplateColumns: `repeat(${Math.max(1, visibleBadges.length)}, minmax(0, 1fr))` }}>
-                    {visibleBadges.map((badge) => (
+                    {visibleBadges.map((badge) => {
+                      const isNewBadge = newBadgeCodes.has(badge.code);
+                      return (
                       <button
                         key={`${badge.code}-${badge.earned ? 'earned' : 'locked'}`}
                         type="button"
                         onClick={() => setSelectedBadgeCode(badge.code)}
-                        className={`rounded-2xl p-1 text-center transition duration-200 hover:scale-[1.04] ${selectedBadge?.code === badge.code ? 'scale-[1.04]' : 'scale-100'} ${badge.earned ? '' : 'opacity-75'}`}
+                        className={`relative rounded-2xl p-1 text-center transition duration-200 hover:scale-[1.04] ${selectedBadge?.code === badge.code ? 'scale-[1.04]' : 'scale-100'} ${isNewBadge ? 'motion-safe:animate-pulse' : ''} ${badge.earned ? '' : 'opacity-75'}`}
                       >
+                        {isNewBadge && (
+                          <span className="absolute right-0 top-0 z-10 rounded-full bg-blue-600 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider text-white shadow-sm">
+                            New
+                          </span>
+                        )}
                         <div className={`mx-auto mb-2 flex h-[4.25rem] w-[4.25rem] items-center justify-center rounded-full border p-1 transition ${selectedBadge?.code === badge.code ? 'border-blue-500 ring-2 ring-blue-500/20' : badge.earned ? 'border-amber-300/80' : 'border-slate-200 dark:border-neutral-700'} ${badge.earned ? 'bg-gradient-to-br from-blue-50 via-white to-amber-50 dark:from-blue-950/40 dark:via-neutral-900 dark:to-amber-950/20' : 'bg-slate-50 dark:bg-neutral-900'}`}>
                           <BadgeIcon icon={badge.earned ? badgeIconFor(badge) : badge.icon || defaultBadgeIconByCode[badge.code] || 'target'} earned={badge.earned} size="lg" />
                         </div>
@@ -821,7 +969,7 @@ const Dashboard: React.FC = () => {
                           {badge.earned ? 'Earned' : 'Locked'}
                         </span>
                       </button>
-                    ))}
+                    )})}
                   </div>
                 ) : (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 dark:border-neutral-800 dark:bg-neutral-950">
@@ -933,7 +1081,7 @@ const Dashboard: React.FC = () => {
                                   <p className="text-xs font-bold text-slate-400 dark:text-neutral-500">{item?.createdAt ? new Date(item.createdAt).toLocaleDateString() : 'Recent'}</p>
                                 </div>
                               </div>
-                              <span className="w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">Interview</span>
+                              <span className="w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">{getInterviewSourceLabel(item)}</span>
                               <div className="whitespace-nowrap text-sm font-black text-slate-700 dark:text-neutral-300">{item?.result?.overallScore ?? 0}% · {completed ? 'Completed' : 'In Progress'}</div>
                               {completed ? (
                                 <Link to={`/result/${item.id}`} className="inline-flex min-h-10 w-full items-center justify-center rounded-xl bg-slate-900 px-4 text-xs font-black uppercase tracking-widest text-white transition hover:bg-blue-600 dark:bg-neutral-800 dark:hover:bg-blue-500">View Analysis</Link>
@@ -957,7 +1105,23 @@ const Dashboard: React.FC = () => {
                       </div>
                       <PaginationControls />
                     </div>
-                    {renderInterviewCards(safeSessions)}
+                    <div className="mb-5 flex flex-wrap gap-2">
+                      {[
+                        { id: 'all', label: 'All' },
+                        { id: 'mock', label: 'Mock Interviews' },
+                        { id: 'resume', label: 'Resume Interviews' },
+                      ].map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setInterviewFilter(item.id as InterviewFilter)}
+                          className={`min-h-10 rounded-2xl px-4 text-xs font-black uppercase tracking-widest transition ${interviewFilter === item.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-700 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-blue-950/30 dark:hover:text-blue-300'}`}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                    {renderInterviewCards(filteredSessions)}
                   </div>
                 )}
 
@@ -969,6 +1133,35 @@ const Dashboard: React.FC = () => {
           </main>
         </div>
       </div>
+      {toastBadge && (
+        <div className="fixed inset-x-4 bottom-4 z-[110] sm:inset-x-auto sm:bottom-auto sm:right-6 sm:top-24">
+          <div className="mx-auto flex max-w-sm items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl shadow-slate-900/10 dark:border-neutral-800 dark:bg-neutral-900 dark:shadow-black/30">
+            <div className="flex min-w-0 items-center gap-3">
+              <BadgeIcon icon={badgeIconFor(toastBadge)} earned size="sm" />
+              <div className="min-w-0">
+                <p className="text-xs font-black uppercase tracking-widest text-blue-600 dark:text-blue-300">Badge Unlocked</p>
+                <p className="truncate text-sm font-black text-slate-900 dark:text-neutral-100">{toastBadge.name}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveAchievement(toastBadge);
+                setToastBadge(null);
+              }}
+              className="shrink-0 rounded-xl bg-blue-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white transition hover:bg-blue-700"
+            >
+              View
+            </button>
+          </div>
+        </div>
+      )}
+      <AchievementUnlockedModal
+        open={Boolean(activeAchievement)}
+        badge={activeAchievement}
+        onClose={() => setActiveAchievement(null)}
+        onViewBadges={handleViewAchievementBadges}
+      />
     </Layout>
   );
 };

@@ -148,7 +148,7 @@ function clip(text: unknown, maxChars: number) {
   return `${t.slice(0, maxChars)}...`;
 }
 
-function extractJsonObject(text: string) {
+export function extractJsonObject(text: string) {
   const fenced = text.match(/```json\s*([\s\S]*?)\s*```/i);
   const raw = (fenced ? fenced[1] : text).trim();
   const start = raw.indexOf("{");
@@ -778,7 +778,7 @@ function logOpenRouterFailure(context: string, error: { kind: OpenRouterErrorKin
   });
 }
 
-async function openRouterChat(prompt: string, opts?: { timeoutMs?: number; maxTokens?: number }) {
+export async function openRouterChat(prompt: string, opts?: { timeoutMs?: number; maxTokens?: number }) {
   const apiKey = env.OPENROUTER_API_KEY;
   if (!apiKey) {
     return { ok: false as const, error: { kind: "missing_api_key" as const, message: "Missing OPENROUTER_API_KEY" } };
@@ -1058,6 +1058,22 @@ export async function generateInterviewQuestionsBatch(input: {
     return counts;
   }, {});
   const nonCodingFocus = getNonCodingFocus(input.role).join(", ");
+  const rawTechStack = input.techStack && typeof input.techStack === "object" && !Array.isArray(input.techStack)
+    ? input.techStack as Record<string, unknown>
+    : {};
+  const interviewSource = String(rawTechStack.interview_source ?? rawTechStack.source ?? "").toUpperCase();
+  const isResumeInterview = interviewSource === "RESUME";
+  const resumeProfile = rawTechStack.resumeProfile && typeof rawTechStack.resumeProfile === "object"
+    ? rawTechStack.resumeProfile
+    : rawTechStack.profile && typeof rawTechStack.profile === "object"
+      ? rawTechStack.profile
+      : null;
+  const resumeProjects = resumeProfile && typeof resumeProfile === "object" && Array.isArray((resumeProfile as any).projects)
+    ? (resumeProfile as any).projects
+    : [];
+  const resumeFocusAreas = resumeProfile && typeof resumeProfile === "object" && Array.isArray((resumeProfile as any).questionFocusAreas)
+    ? (resumeProfile as any).questionFocusAreas
+    : [];
   const fallbackQuestions = buildFallbackInterviewQuestions({
     difficulty: input.difficulty,
     role: input.role,
@@ -1073,6 +1089,24 @@ export async function generateInterviewQuestionsBatch(input: {
     `Experience: ${clip(input.experience, 120)}`,
     `Interviewer personality: ${input.personality ?? "Senior Engineering Manager"}. Keep the tone professional, constructive, and never rude.`,
     `User-selected skills (exact allowed list): ${selectedSkills.length ? selectedSkills.join(", ") : "none"}`,
+    isResumeInterview
+      ? "Interview source: RESUME. Generate questions from the candidate's resume profile, projects, and claimed technologies only."
+      : "Interview source: MOCK_FORM.",
+    isResumeInterview
+      ? `Resume profile JSON: ${clip(JSON.stringify(resumeProfile ?? {}), 1800)}`
+      : "",
+    isResumeInterview && resumeProjects.length
+      ? `Resume projects for deep-dive context: ${clip(JSON.stringify(resumeProjects), 1200)}`
+      : "",
+    isResumeInterview && resumeFocusAreas.length
+      ? `Resume focus areas: ${resumeFocusAreas.slice(0, 10).join(", ")}`
+      : "",
+    isResumeInterview
+      ? "Resume interview mix for 10 questions: 2 project-based, 3 skill-based technical, 2 resume deep-dive, 1 HR/self-introduction, and the remaining questions based on existing coding/MCQ/domain rules."
+      : "",
+    isResumeInterview
+      ? "For resume interviews, avoid generic role-only questions, do not ask about skills not present in the allowed list, and make project questions reference a specific project or claimed technology from the resume profile."
+      : "",
     `Required question distribution: ${Object.entries(expectedTypeCounts).map(([type, amount]) => `${amount} ${type}`).join(", ")}.`,
     `Domain policy requires coding/data tasks: ${requiresCodingTasks ? "yes" : "no"}. Never generate coding or implementation-practical questions when it is no.`,
     codingQuestionCount

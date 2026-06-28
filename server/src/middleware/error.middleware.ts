@@ -20,6 +20,11 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   if (mysqlCode === "ER_DUP_ENTRY") {
     return res.status(409).json({ message: "Duplicate entry" });
   }
+  if ((err as any)?.name === "MulterError") {
+    const code = (err as any)?.code;
+    const message = code === "LIMIT_FILE_SIZE" ? "File size must be less than 5MB." : "Invalid file upload.";
+    return res.status(400).json({ message });
+  }
 
   const status = err instanceof ApiError ? err.status : 500;
   const message = err instanceof Error ? err.message : "Unknown error";

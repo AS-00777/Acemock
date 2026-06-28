@@ -44,6 +44,8 @@ type InterviewRow = RowDataPacket & {
   status: "IN_PROGRESS" | "COMPLETED";
   warning_count: number;
   follow_up_count: number;
+  interview_source?: "MOCK_FORM" | "RESUME" | null;
+  resume_id?: number | null;
   created_at: Date;
   completed_at: Date | null;
 };
@@ -418,6 +420,8 @@ export async function startInterview(params: {
   difficulty?: Difficulty;
   techStack: unknown;
   personality?: InterviewerPersonality;
+  interviewSource?: "MOCK_FORM" | "RESUME";
+  resumeId?: number;
 }) {
   const selectedSkills = Object.freeze([...selectedSkillsFromTechStack(params.techStack)]);
   if (!selectedSkills.length) {
@@ -436,20 +440,39 @@ export async function startInterview(params: {
     skills: selectedSkills,
     difficulty,
     domain,
+    interview_source: params.interviewSource ?? (incomingTechStack.interview_source as any) ?? (incomingTechStack.source as any) ?? "MOCK_FORM",
   });
   const requestSnapshot = Object.freeze({ domain, selectedSkills, difficulty, experience, questionCount, techStack });
   await assertUserCanStartInterview(params.userId);
 
+  const interviewColumns = await query<ColumnRow[]>("SHOW COLUMNS FROM interviews");
+  const interviewColumnSet = new Set(interviewColumns.map((row) => row.Field));
+  const canStoreSource = interviewColumnSet.has("interview_source");
+  const canStoreResumeId = interviewColumnSet.has("resume_id");
+  const source = params.interviewSource ?? (incomingTechStack.interview_source === "RESUME" || incomingTechStack.source === "RESUME" ? "RESUME" : "MOCK_FORM");
+  const insertColumns = ["user_id", "role", "experience", "personality", "difficulty", "tech_stack", "status", "created_at"];
+  const placeholders = ["?", "?", "?", "?", "?", "?", "'IN_PROGRESS'", "NOW()"];
+  const values: unknown[] = [
+    params.userId,
+    requestSnapshot.domain,
+    requestSnapshot.experience,
+    personality,
+    requestSnapshot.difficulty,
+    JSON.stringify(requestSnapshot.techStack),
+  ];
+  if (canStoreSource) {
+    insertColumns.splice(-2, 0, "interview_source");
+    placeholders.splice(-2, 0, "?");
+    values.push(source);
+  }
+  if (canStoreResumeId) {
+    insertColumns.splice(-2, 0, "resume_id");
+    placeholders.splice(-2, 0, "?");
+    values.push(params.resumeId ?? null);
+  }
   const result = await exec(
-    "INSERT INTO interviews (user_id, role, experience, personality, difficulty, tech_stack, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'IN_PROGRESS', NOW())",
-    [
-      params.userId,
-      requestSnapshot.domain,
-      requestSnapshot.experience,
-      personality,
-      requestSnapshot.difficulty,
-      JSON.stringify(requestSnapshot.techStack),
-    ]
+    `INSERT INTO interviews (${insertColumns.join(", ")}) VALUES (${placeholders.join(", ")})`,
+    values
   );
 
   const rows = await query<InterviewRow[]>(
@@ -1165,6 +1188,8 @@ export async function getInterviewHistory(params: { userId: number; page: number
       experience: it.experience,
       difficulty: it.difficulty ?? null,
       techStack,
+      interviewSource: it.interview_source ?? (techStack?.interview_source === "RESUME" || techStack?.source === "RESUME" ? "RESUME" : "MOCK_FORM"),
+      resumeId: it.resume_id ?? null,
       status: it.status,
       createdAt: it.created_at,
       completedAt: it.completed_at,
@@ -1219,6 +1244,8 @@ export async function getInterviewDetails(params: { interviewId: number; userId:
     followUpCount: interview.follow_up_count,
     difficulty: interview.difficulty ?? null,
     techStack: interview.tech_stack,
+    interviewSource: interview.interview_source ?? ((interview.tech_stack as any)?.interview_source === "RESUME" ? "RESUME" : "MOCK_FORM"),
+    resumeId: interview.resume_id ?? null,
     status: interview.status,
     createdAt: interview.created_at,
     completedAt: interview.completed_at,
