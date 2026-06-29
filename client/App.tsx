@@ -23,6 +23,9 @@ import AptitudeResult from './pages/AptitudeResult';
 import ComingSoon from './pages/ComingSoon';
 import AtsChecker from './pages/AtsChecker';
 import ResumeJdAnalyzer from './pages/ResumeJdAnalyzer';
+import HRInterviewStart from './pages/HRInterviewStart';
+import HRInterviewSimulator from './pages/HRInterviewSimulator';
+import HRInterviewResult from './pages/HRInterviewResult';
 
 const clerkPublishableKey = process.env.REACT_APP_CLERK_PUBLISHABLE_KEY;
 
@@ -53,6 +56,9 @@ const App: FC = () => {
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="/interview-form" element={<ProtectedRoute><InterviewForm /></ProtectedRoute>} />
             <Route path="/resume-interview" element={<ProtectedRoute><ResumeInterview /></ProtectedRoute>} />
+            <Route path="/hr-interview" element={<ProtectedRoute><HRInterviewStart /></ProtectedRoute>} />
+            <Route path="/hr-interview/simulator/:id" element={<ProtectedRoute><HRInterviewSimulator /></ProtectedRoute>} />
+            <Route path="/hr-interview/result/:interviewId" element={<ProtectedRoute><HRInterviewResult /></ProtectedRoute>} />
             <Route path="/interview-session/:id" element={<ProtectedRoute><InterviewSession /></ProtectedRoute>} />
             <Route path="/interview/:id" element={<ProtectedRoute><InterviewSession /></ProtectedRoute>} />
             <Route path="/result/:id" element={<ProtectedRoute><Result /></ProtectedRoute>} />

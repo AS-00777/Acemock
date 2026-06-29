@@ -41,10 +41,11 @@ type InterviewRow = RowDataPacket & {
   personality: InterviewerPersonality;
   difficulty: Difficulty | null;
   tech_stack: any;
-  status: "IN_PROGRESS" | "COMPLETED";
+  status: "IN_PROGRESS" | "COMPLETED" | "ABANDONED";
   warning_count: number;
   follow_up_count: number;
   interview_source?: "MOCK_FORM" | "RESUME" | null;
+  interview_type?: string | null;
   resume_id?: number | null;
   created_at: Date;
   completed_at: Date | null;
@@ -338,6 +339,81 @@ function normalizeQuestion(text: string): string {
     .trim();
 }
 
+function normalizeQuestionKey(text: string): string {
+  return normalizeQuestion(text).replace(/\s+/g, " ");
+}
+
+function normalizeCodingTestSignature(testCases: unknown) {
+  const parsed = Array.isArray(testCases) ? testCases : parseJsonMaybe(testCases);
+  if (!Array.isArray(parsed)) return "";
+  return JSON.stringify(parsed.map((item) => ({
+    input: (item as any)?.input ?? null,
+    expected: (item as any)?.expectedOutput ?? (item as any)?.expected ?? (item as any)?.output ?? null,
+  })));
+}
+
+type NormalizedInterviewQuestion = ReturnType<typeof normalizeQuestionsForSave>[number];
+
+function enforceUniqueGeneratedQuestions(
+  role: string,
+  selectedSkills: string[],
+  questions: NormalizedInterviewQuestion[]
+) {
+  const codingSkills = getCodingEligibleSkills(role, selectedSkills);
+  const seenQuestionText = new Set<string>();
+  const seenCodingProblem = new Set<string>();
+  const repaired = questions.map((question, index) => {
+    let candidate = question;
+    let textKey = normalizeQuestionKey(candidate.question);
+    let codingKey = candidate.questionType === "coding"
+      ? `${textKey}|${normalizeCodingTestSignature(candidate.testCases)}`
+      : "";
+    if (seenQuestionText.has(textKey) || (codingKey && seenCodingProblem.has(codingKey))) {
+      if (candidate.questionType === "coding" && codingSkills.length) {
+        const skill = candidate.skill && codingSkills.some((item) => item.toLowerCase() === String(candidate.skill).toLowerCase())
+          ? String(candidate.skill)
+          : codingSkills[index % codingSkills.length];
+        const fallback = buildCodingFallback(skill, index + seenCodingProblem.size + 1);
+        candidate = {
+          ...candidate,
+          question: fallback.question,
+          expectedAnswer: `A strong answer should implement the exact behavior requested in "${fallback.question}" and explain logic, edge cases, complexity, and tests.`,
+          keyConcepts: ["Logic", "Approach", "Syntax quality", "Edge cases", "Complexity"],
+          topic: skill,
+          skill,
+          language: fallback.language,
+          starterCode: fallback.starterCode,
+          testCases: fallback.visibleTestCases,
+          hiddenTestCases: fallback.hiddenTestCases,
+          constraints: fallback.constraints,
+          expectedOutput: fallback.expectedOutput,
+          evaluationType: fallback.evaluationType,
+        };
+      } else {
+        const skill = String(candidate.skill ?? candidate.topic ?? selectedSkills[index % Math.max(1, selectedSkills.length)] ?? role);
+        candidate = {
+          ...candidate,
+          question: `Explain one ${skill} decision you would make in a real ${role} project, including the tradeoff, risk, and a concrete example.`,
+          expectedAnswer: candidate.expectedAnswer || "A strong answer should explain a concrete decision, tradeoff, risk, and practical example.",
+          keyConcepts: candidate.keyConcepts?.length ? candidate.keyConcepts : ["Decision making", "Tradeoffs", "Risk", "Practical example"],
+        };
+      }
+      textKey = normalizeQuestionKey(candidate.question);
+      codingKey = candidate.questionType === "coding"
+        ? `${textKey}|${normalizeCodingTestSignature(candidate.testCases)}`
+        : "";
+    }
+    if (seenQuestionText.has(textKey) || (codingKey && seenCodingProblem.has(codingKey))) {
+      throw new ApiError(500, "Generated duplicate interview question failed validation");
+    }
+    seenQuestionText.add(textKey);
+    if (codingKey) seenCodingProblem.add(codingKey);
+    return candidate;
+  });
+  if (repaired.length !== questions.length) throw new ApiError(500, "Generated interview question count changed during validation");
+  return repaired;
+}
+
 function resolveSafeAudioPath(storedPath: string) {
   const resolved = path.resolve(storedPath);
   const relative = path.relative(AUDIO_UPLOAD_DIR, resolved);
@@ -495,8 +571,16 @@ export async function startInterview(params: {
     [...requestSnapshot.selectedSkills],
     generatedQuestions
   );
+  const uniqueQuestionsToSave = enforceUniqueGeneratedQuestions(
+    requestSnapshot.domain,
+    [...requestSnapshot.selectedSkills],
+    questionsToSave
+  );
+  if (uniqueQuestionsToSave.length !== requestSnapshot.questionCount) {
+    throw new ApiError(500, "Generated interview must contain exactly 10 unique questions");
+  }
 
-  for (const question of questionsToSave) {
+  for (const question of uniqueQuestionsToSave) {
     await exec(
       "INSERT INTO questions (interview_id, question_text, question_type, expected_answer, key_concepts, difficulty, topic, skill, language, starter_code, test_cases, hidden_test_cases, constraints_json, expected_output, evaluation_type, options_json, correct_option, explanation, expected_time_complexity, expected_space_complexity, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
       [
@@ -862,8 +946,8 @@ function calculateHiddenCorrectness(params: {
   const language = normalizeRunLanguage(params.language);
   if (language !== "javascript" && language !== "typescript") {
     return {
-      score: 0,
-      result: `passed 0/${params.hiddenTestCases.length} hidden test cases (execution support for ${params.language || "this language"} is not available)`,
+      score: null,
+      result: "Correctness is estimated from the submitted approach because automated test execution is not enabled.",
     };
   }
 
@@ -1188,6 +1272,7 @@ export async function getInterviewHistory(params: { userId: number; page: number
       experience: it.experience,
       difficulty: it.difficulty ?? null,
       techStack,
+      interviewType: it.interview_type ?? (techStack?.interview_type === "hr" || techStack?.source === "HR" ? "hr" : "technical"),
       interviewSource: it.interview_source ?? (techStack?.interview_source === "RESUME" || techStack?.source === "RESUME" ? "RESUME" : "MOCK_FORM"),
       resumeId: it.resume_id ?? null,
       status: it.status,
@@ -1244,6 +1329,7 @@ export async function getInterviewDetails(params: { interviewId: number; userId:
     followUpCount: interview.follow_up_count,
     difficulty: interview.difficulty ?? null,
     techStack: interview.tech_stack,
+    interviewType: interview.interview_type ?? ((interview.tech_stack as any)?.interview_type === "hr" ? "hr" : "technical"),
     interviewSource: interview.interview_source ?? ((interview.tech_stack as any)?.interview_source === "RESUME" ? "RESUME" : "MOCK_FORM"),
     resumeId: interview.resume_id ?? null,
     status: interview.status,

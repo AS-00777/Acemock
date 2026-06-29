@@ -19,12 +19,23 @@ const router = Router();
 
 router.use(requireAuth);
 
+async function safeDashboardBackfill(userId: string | number) {
+  try {
+    await backfillUserActivitiesFromCompletedData(userId);
+  } catch (error) {
+    console.warn("Dashboard activity backfill failed, continuing without blocking dashboard.", {
+      userId: String(userId),
+      message: String((error as Error)?.message ?? error),
+    });
+  }
+}
+
 router.get("/badges", async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Unauthorized");
     const userId = req.user.clerkId ?? String(req.user.id);
 
-    await backfillUserActivitiesFromCompletedData(userId);
+    await safeDashboardBackfill(userId);
     const awardResult = await checkAndAwardBadges(userId);
 
     const [earnedBadges, lockedBadges, allBadges, currentStreak, nextBadge] = await Promise.all([
@@ -55,7 +66,7 @@ router.get("/activity-calendar", async (req: AuthRequest, res: Response, next: N
     if (!req.user) throw new ApiError(401, "Unauthorized");
     const userId = req.user.clerkId ?? String(req.user.id);
 
-    await backfillUserActivitiesFromCompletedData(userId);
+    await safeDashboardBackfill(userId);
     res.json(await getActivityCalendar(userId));
   } catch (error) {
     next(error);
@@ -67,7 +78,7 @@ router.get("/career-readiness", async (req: AuthRequest, res: Response, next: Ne
     if (!req.user) throw new ApiError(401, "Unauthorized");
     const userId = req.user.clerkId ?? String(req.user.id);
 
-    await backfillUserActivitiesFromCompletedData(userId);
+    await safeDashboardBackfill(userId);
     res.json(await getCareerReadinessStats(userId));
   } catch (error) {
     next(error);

@@ -12,6 +12,7 @@ import dashboardRoutes from "./routes/dashboard.routes";
 import atsRoutes from "./routes/ats.routes";
 import resumeJdRoutes from "./routes/resumeJd.routes";
 import resumeRoutes from "./routes/resume.routes";
+import hrInterviewRoutes from "./routes/hrInterview.routes";
 import { errorHandler, notFound } from "./middleware/error.middleware";
 
 export const app = express();
@@ -40,6 +41,7 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/ats", atsRoutes);
 app.use("/api/resume-jd", resumeJdRoutes);
 app.use("/api/resume", resumeRoutes);
+app.use("/api/hr-interview", hrInterviewRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

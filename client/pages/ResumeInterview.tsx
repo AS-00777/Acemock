@@ -144,17 +144,19 @@ const ResumeInterview: React.FC = () => {
   const hiddenSkillCount = Math.max(0, detectedStack.length - visibleSkills.length);
   const readableWordCount = Number(analysis?.signals?.readableWordCount ?? 0);
   const hasRealError = Boolean(error);
+  const displayError = error === 'Forbidden' ? 'You are not allowed to start this resume interview right now.' : error;
 
   return (
     <Layout>
-      <div className="mx-auto w-full max-w-7xl overflow-x-hidden px-4 py-6 sm:px-6 sm:py-10">
-        <section className="overflow-hidden rounded-[2rem] border border-neutral-800 bg-neutral-950 px-4 py-6 shadow-2xl shadow-black/20 sm:px-6 lg:px-8">
+      <div className="min-h-[calc(100vh-4rem)] bg-slate-50">
+      <div className="mx-auto w-full max-w-7xl overflow-x-hidden px-4 py-8 sm:px-6 sm:py-12">
+        <section className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white px-4 py-6 shadow-sm sm:px-6 lg:px-8">
           <div className="mb-7 sm:mb-9">
-            <p className="mb-3 text-[11px] font-black uppercase tracking-[0.24em] text-blue-400">Resume Interview</p>
-            <h1 className="mb-3 break-words font-poppins text-3xl font-black text-white sm:text-4xl">
+            <p className="mb-3 text-[11px] font-black uppercase tracking-[0.24em] text-blue-600">Resume Interview</p>
+            <h1 className="mb-3 break-words font-poppins text-3xl font-black text-slate-900 sm:text-4xl">
               Resume analysis ready
             </h1>
-            <p className="max-w-2xl text-base font-semibold text-slate-400 sm:text-lg">
+            <p className="max-w-2xl text-base font-semibold text-slate-600 sm:text-lg">
               Confirm the extracted profile, then start an interview tailored to the resume.
             </p>
           </div>
@@ -164,28 +166,28 @@ const ResumeInterview: React.FC = () => {
               onDragOver={onDragOver}
               onDragLeave={onDragLeave}
               onDrop={onDrop}
-              className={`min-w-0 rounded-[1.75rem] border bg-neutral-900 p-5 shadow-sm transition sm:p-6 ${
+              className={`min-w-0 rounded-[1.75rem] border bg-white p-5 shadow-sm transition sm:p-6 ${
                 !file && !analyzing ? 'border-dashed' : ''
               } ${
                 isDragging
-                  ? 'border-blue-400 bg-neutral-900/95'
+                  ? 'border-blue-400 bg-blue-50'
                   : analysis
-                    ? 'border-emerald-500/35'
-                    : 'border-neutral-800'
+                    ? 'border-emerald-200'
+                    : 'border-slate-200'
               }`}
             >
               {!file && !analyzing && (
-                <div className="flex min-h-[410px] flex-col items-center justify-center text-center">
-                  <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-3xl border border-blue-500/20 bg-blue-500/10 text-blue-300">
+                <div className="flex min-h-[360px] flex-col items-center justify-center text-center">
+                  <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-3xl border border-blue-100 bg-blue-50 text-blue-600">
                     <Icons.CloudUpload />
                   </div>
-                  <h3 className="mb-2 text-xl font-black text-white">Upload Resume PDF</h3>
-                  <p className="mb-8 max-w-sm text-sm font-semibold text-slate-400">
+                  <h3 className="mb-2 text-xl font-black text-slate-900">Upload Resume PDF</h3>
+                  <p className="mb-8 max-w-sm text-sm font-semibold text-slate-600">
                     Drop your resume here or choose a text-based PDF up to 5MB.
                   </p>
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    className="inline-flex min-h-12 items-center justify-center rounded-2xl bg-gradient-to-r from-blue-600 to-blue-500 px-8 text-sm font-black text-white shadow-lg shadow-blue-950/30 transition hover:from-blue-500 hover:to-blue-400 active:scale-[0.98]"
+                    className="inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-blue-600 px-8 text-sm font-black text-white shadow-sm shadow-blue-600/20 transition hover:bg-blue-700 active:scale-[0.98] sm:w-auto"
                   >
                     Select PDF
                   </button>
@@ -200,54 +202,54 @@ const ResumeInterview: React.FC = () => {
               )}
 
               {analyzing && (
-                <div className="flex min-h-[410px] flex-col justify-center">
+                <div className="flex min-h-[360px] flex-col justify-center">
                   <div className="mb-8 flex items-center gap-4">
-                    <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-3xl border border-blue-500/20 bg-blue-500/10">
-                      <div className="h-7 w-7 animate-spin rounded-full border-2 border-blue-300 border-t-transparent"></div>
+                    <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-3xl border border-blue-100 bg-blue-50">
+                      <div className="h-7 w-7 animate-spin rounded-full border-2 border-blue-600 border-t-transparent"></div>
                     </div>
                     <div className="min-w-0">
-                      <h3 className="text-2xl font-black text-white">Analyzing your resume...</h3>
-                      <p className="mt-1 text-sm font-semibold text-slate-400">
+                      <h3 className="text-2xl font-black text-slate-900">Analyzing your resume...</h3>
+                      <p className="mt-1 text-sm font-semibold text-slate-600">
                         Extracting skills, projects and role information
                       </p>
                     </div>
                   </div>
                   <div className="space-y-4">
-                    <div className="h-4 w-2/3 animate-pulse rounded-full bg-neutral-800"></div>
-                    <div className="h-24 animate-pulse rounded-3xl bg-neutral-800"></div>
+                    <div className="h-4 w-2/3 animate-pulse rounded-full bg-slate-100"></div>
+                    <div className="h-24 animate-pulse rounded-3xl bg-slate-100"></div>
                     <div className="grid grid-cols-3 gap-3">
-                      <div className="h-20 animate-pulse rounded-2xl bg-neutral-800"></div>
-                      <div className="h-20 animate-pulse rounded-2xl bg-neutral-800"></div>
-                      <div className="h-20 animate-pulse rounded-2xl bg-neutral-800"></div>
+                      <div className="h-20 animate-pulse rounded-2xl bg-slate-100"></div>
+                      <div className="h-20 animate-pulse rounded-2xl bg-slate-100"></div>
+                      <div className="h-20 animate-pulse rounded-2xl bg-slate-100"></div>
                     </div>
                   </div>
                 </div>
               )}
 
               {file && !analyzing && (
-                <div className="flex min-h-[410px] flex-col">
+                <div className="flex min-h-[360px] flex-col">
                   {analysis && (
-                    <div className="mb-6 rounded-3xl border border-emerald-500/20 bg-emerald-500/10 p-4">
-                      <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-500 text-white">
+                    <div className="mb-6 rounded-3xl border border-emerald-100 bg-emerald-50 p-4">
+                      <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-600 text-white">
                         <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
                         </svg>
                       </div>
-                      <h2 className="text-xl font-black text-white">Resume Analyzed Successfully</h2>
-                      <p className="mt-1 text-sm font-semibold text-emerald-100/80">
+                      <h2 className="text-xl font-black text-slate-900">Resume analyzed successfully</h2>
+                      <p className="mt-1 text-sm font-semibold text-emerald-700">
                         Your resume has been extracted and analyzed.
                       </p>
                     </div>
                   )}
 
-                  <div className="mb-5 rounded-3xl border border-neutral-800 bg-neutral-950/70 p-4">
+                  <div className="mb-5 rounded-3xl border border-slate-200 bg-slate-50 p-4">
                     <div className="flex items-start gap-4">
-                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-blue-500/20 bg-blue-500/10 text-blue-300">
+                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-blue-100 bg-blue-50 text-blue-600">
                         <Icons.Resume />
                       </div>
                       <div className="min-w-0">
                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Uploaded PDF</p>
-                        <h3 className="mt-1 break-words text-base font-black leading-snug text-white">{file.name}</h3>
+                        <h3 className="mt-1 break-words text-base font-black leading-snug text-slate-900">{file.name}</h3>
                         <p className="mt-1 text-xs font-bold text-slate-500">PDF / {formatBytes(file.size)}</p>
                       </div>
                     </div>
@@ -260,9 +262,9 @@ const ResumeInterview: React.FC = () => {
                         ['Experience', profile.detectedExperience],
                         ['Interview Level', profile.detectedDifficulty],
                       ].map(([label, value]) => (
-                        <div key={label} className="flex items-center justify-between gap-4 rounded-2xl border border-neutral-800 bg-neutral-950/60 px-4 py-3">
+                        <div key={label} className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                           <span className="text-xs font-black uppercase tracking-widest text-slate-500">{label}</span>
-                          <span className={`min-w-0 break-words text-right text-sm font-black ${label === 'Interview Level' ? 'text-amber-300' : 'text-slate-100'}`}>
+                          <span className={`min-w-0 break-words text-right text-sm font-black ${label === 'Interview Level' ? 'text-blue-700' : 'text-slate-900'}`}>
                             {value}
                           </span>
                         </div>
@@ -274,17 +276,17 @@ const ResumeInterview: React.FC = () => {
                     <div className="mb-6">
                       <p className="mb-3 text-xs font-black uppercase tracking-widest text-slate-500">What we found</p>
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
-                        <div className="rounded-2xl border border-neutral-800 bg-neutral-950/60 p-3">
+                        <div className="rounded-2xl border border-blue-100 bg-blue-50 p-3">
                           <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">LinkedIn</p>
-                          <p className="mt-1 text-sm font-black text-slate-100">{analysis.signals?.hasLinkedin ? 'Detected' : 'Not found'}</p>
+                          <p className={`mt-1 text-sm font-black ${analysis.signals?.hasLinkedin ? 'text-emerald-700' : 'text-slate-600'}`}>{analysis.signals?.hasLinkedin ? 'Detected' : 'Not found'}</p>
                         </div>
-                        <div className="rounded-2xl border border-neutral-800 bg-neutral-950/60 p-3">
+                        <div className="rounded-2xl border border-blue-100 bg-blue-50 p-3">
                           <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">GitHub</p>
-                          <p className="mt-1 text-sm font-black text-slate-100">{analysis.signals?.hasGithub ? 'Detected' : 'Not found'}</p>
+                          <p className={`mt-1 text-sm font-black ${analysis.signals?.hasGithub ? 'text-emerald-700' : 'text-slate-600'}`}>{analysis.signals?.hasGithub ? 'Detected' : 'Not found'}</p>
                         </div>
-                        <div className="rounded-2xl border border-neutral-800 bg-neutral-950/60 p-3">
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
                           <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Readable Text</p>
-                          <p className="mt-1 text-sm font-black text-slate-100">{readableWordCount ? `${readableWordCount} words` : 'Found'}</p>
+                          <p className="mt-1 text-sm font-black text-slate-900">{readableWordCount ? `${readableWordCount} words` : 'Found'}</p>
                         </div>
                       </div>
                     </div>
@@ -294,7 +296,7 @@ const ResumeInterview: React.FC = () => {
                     <button
                       onClick={handleStartInterview}
                       disabled={!analysis || loadingQuestions}
-                      className="inline-flex min-h-13 w-full items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-blue-600 to-blue-500 px-5 py-4 text-sm font-black text-white shadow-lg shadow-blue-950/30 transition hover:from-blue-500 hover:to-blue-400 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex min-h-13 w-full items-center justify-center gap-3 rounded-2xl bg-blue-600 px-5 py-4 text-sm font-black text-white shadow-sm shadow-blue-600/20 transition hover:bg-blue-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {loadingQuestions ? (
                         <>
@@ -307,7 +309,7 @@ const ResumeInterview: React.FC = () => {
                     </button>
                     <button
                       onClick={resetUpload}
-                      className="inline-flex min-h-12 w-full items-center justify-center rounded-2xl border border-neutral-700 px-5 text-sm font-black text-slate-300 transition hover:border-blue-500/50 hover:bg-blue-500/10 hover:text-blue-200"
+                      className="inline-flex min-h-12 w-full items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 text-sm font-black text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
                     >
                       Change Resume
                     </button>
@@ -319,42 +321,42 @@ const ResumeInterview: React.FC = () => {
               )}
 
               {hasRealError && (
-                <div className="mt-5 flex items-start gap-3 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm font-bold text-red-100">
+                <div className="mt-5 flex items-start gap-3 rounded-2xl border border-red-100 bg-red-50 p-4 text-sm font-bold text-red-700">
                   <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                   </svg>
-                  <span>{error}</span>
+                  <span>{displayError}</span>
                 </div>
               )}
             </div>
 
-            <div className="min-w-0 rounded-[1.75rem] border border-neutral-800 bg-neutral-900 p-5 shadow-sm sm:p-6">
+            <div className="min-w-0 rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
               <div className="mb-6">
-                <h2 className="text-2xl font-black text-white">Profile Preview</h2>
-                <p className="mt-1 text-sm font-semibold text-slate-400">Generated from your uploaded resume</p>
+                <h2 className="text-2xl font-black text-slate-900">Profile Preview</h2>
+                <p className="mt-1 text-sm font-semibold text-slate-600">Generated from your uploaded resume</p>
               </div>
 
               {profile ? (
                 <div className="space-y-7">
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4">
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Detected Role</p>
-                      <p className="mt-2 break-words text-base font-black text-white">{profile.detectedRole}</p>
+                      <p className="mt-2 break-words text-base font-black text-slate-900">{profile.detectedRole}</p>
                     </div>
-                    <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4">
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Experience</p>
-                      <p className="mt-2 text-base font-black text-white">{profile.detectedExperience}</p>
+                      <p className="mt-2 text-base font-black text-slate-900">{profile.detectedExperience}</p>
                     </div>
-                    <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-amber-200/70">Interview Level</p>
-                      <p className="mt-2 text-base font-black text-amber-300">{profile.detectedDifficulty}</p>
+                    <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-blue-700">Interview Level</p>
+                      <p className="mt-2 text-base font-black text-blue-700">{profile.detectedDifficulty}</p>
                     </div>
                   </div>
 
                   <div>
                     <div className="mb-3 flex items-center justify-between gap-3">
-                      <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-widest text-slate-300">
-                        <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-blue-500/10 text-blue-300">
+                      <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-widest text-slate-700">
+                        <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                           <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
                           </svg>
@@ -366,26 +368,26 @@ const ResumeInterview: React.FC = () => {
                     {visibleSkills.length ? (
                       <div className="flex max-w-full flex-wrap gap-2 overflow-hidden">
                         {visibleSkills.map((skill) => (
-                          <span key={skill} className="max-w-full truncate rounded-xl border border-blue-500/20 bg-blue-500/10 px-3 py-1.5 text-xs font-black text-blue-200">
+                          <span key={skill} className="max-w-full truncate rounded-xl border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs font-black text-blue-700">
                             {skill}
                           </span>
                         ))}
                         {hiddenSkillCount > 0 && (
-                          <span className="rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-1.5 text-xs font-black text-slate-400">
+                          <span className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-black text-slate-600">
                             +{hiddenSkillCount} more
                           </span>
                         )}
                       </div>
                     ) : (
-                      <p className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4 text-sm font-bold text-amber-100">
+                      <p className="rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm font-bold text-amber-700">
                         No strong skills detected. Try uploading a more detailed resume.
                       </p>
                     )}
                   </div>
 
                   <div>
-                    <h3 className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-widest text-slate-300">
-                      <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-blue-500/10 text-blue-300">
+                    <h3 className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-widest text-slate-700">
+                      <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                         <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 7h16M4 12h16M4 17h10" />
                         </svg>
@@ -393,17 +395,17 @@ const ResumeInterview: React.FC = () => {
                       Projects
                     </h3>
                     {profile.projects.length ? (
-                      <div className="max-h-[340px] space-y-3 overflow-y-auto pr-2 [scrollbar-color:#2563eb_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-700 [&::-webkit-scrollbar-thumb:hover]:bg-blue-500 [&::-webkit-scrollbar-track]:bg-transparent">
+                      <div className="max-h-[340px] space-y-3 overflow-y-auto pr-2 [scrollbar-color:#93c5fd_#f1f5f9] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-blue-300 [&::-webkit-scrollbar-thumb:hover]:bg-blue-400 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-slate-100">
                         {profile.projects.map((project) => (
-                          <div key={`${project.name}-${project.description}`} className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4">
-                            <p className="break-words text-sm font-black text-white">{project.name}</p>
-                            <p className="mt-1 line-clamp-2 text-sm font-semibold text-slate-400">
+                          <div key={`${project.name}-${project.description}`} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                            <p className="break-words text-sm font-black text-slate-900">{project.name}</p>
+                            <p className="mt-1 line-clamp-2 text-sm font-semibold text-slate-600">
                               {project.description || 'Project details detected from resume.'}
                             </p>
                             {project.technologies?.length > 0 && (
                               <div className="mt-3 flex flex-wrap gap-1.5">
                                 {project.technologies.slice(0, 6).map((tech) => (
-                                  <span key={`${project.name}-${tech}`} className="max-w-full truncate rounded-lg border border-neutral-700 bg-neutral-900 px-2 py-1 text-[10px] font-black text-slate-300">
+                                  <span key={`${project.name}-${tech}`} className="max-w-full truncate rounded-lg border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-black text-blue-700">
                                     {tech}
                                   </span>
                                 ))}
@@ -413,19 +415,19 @@ const ResumeInterview: React.FC = () => {
                         ))}
                       </div>
                     ) : (
-                      <p className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4 text-sm font-bold text-slate-400">
+                      <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm font-bold text-slate-600">
                         No projects detected from resume.
                       </p>
                     )}
                   </div>
                 </div>
               ) : (
-                <div className="flex min-h-[410px] flex-col justify-center rounded-3xl border border-dashed border-neutral-800 p-8 text-center">
-                  <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-neutral-950 text-slate-500">
+                <div className="flex min-h-[360px] flex-col justify-center rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
+                  <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
                     <Icons.Interview />
                   </div>
-                  <p className="text-base font-black text-slate-200">Waiting for resume analysis</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-500">
+                  <p className="text-base font-black text-slate-900">Waiting for resume analysis</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-600">
                     Your detected role, skills, and projects will appear here.
                   </p>
                 </div>
@@ -433,6 +435,7 @@ const ResumeInterview: React.FC = () => {
             </div>
           </div>
         </section>
+      </div>
       </div>
     </Layout>
   );

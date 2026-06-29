@@ -173,11 +173,18 @@ const isTechnicalAptitudeItem = (item: Pick<AptitudeHistoryItem, 'title' | 'sect
 };
 
 const getInterviewSource = (item: any) => {
+  const type = item?.interviewType ?? item?.interview_type ?? item?.techStack?.interview_type;
+  if (String(type || '').toLowerCase() === 'hr' || item?.techStack?.source === 'HR') return 'HR';
   const raw = item?.interviewSource ?? item?.interview_source ?? item?.techStack?.interview_source ?? item?.techStack?.source;
   return String(raw || 'MOCK_FORM').toUpperCase() === 'RESUME' ? 'RESUME' : 'MOCK_FORM';
 };
 
-const getInterviewSourceLabel = (item: any) => getInterviewSource(item) === 'RESUME' ? 'Resume Interview' : 'Mock Interview';
+const getInterviewSourceLabel = (item: any) => {
+  const source = getInterviewSource(item);
+  if (source === 'HR') return 'HR Interview';
+  if (source === 'RESUME') return 'Resume Mock';
+  return 'Mock Interview';
+};
 
 const badgeIconFor = (badge: Pick<BadgeShowcaseItem, 'code' | 'icon'>) => {
   if (badge.icon && badgeIconKeys.has(badge.icon)) return badge.icon;
@@ -476,6 +483,14 @@ const Dashboard: React.FC = () => {
           icon: Mic,
         },
     {
+      title: 'HR Mock Interview',
+      description: 'Practice behavioral answers with voice and camera',
+      status: 'Suggested',
+      action: 'Start',
+      to: '/hr-interview',
+      icon: Mic,
+    },
+    {
       title: 'Aptitude Practice',
       description: 'Improve speed and accuracy',
       status: completedAptitudeItems.length > 0 ? 'Done' : 'Suggested',
@@ -488,7 +503,7 @@ const Dashboard: React.FC = () => {
   const filteredSessions = safeSessions.filter((item) => {
     const source = getInterviewSource(item);
     if (interviewFilter === 'resume') return source === 'RESUME';
-    if (interviewFilter === 'mock') return source !== 'RESUME';
+    if (interviewFilter === 'mock') return source !== 'RESUME' && source !== 'HR';
     return true;
   });
   const earnedBadges = Array.isArray(badgeData?.earnedBadges) ? badgeData.earnedBadges : [];
@@ -677,7 +692,7 @@ const Dashboard: React.FC = () => {
               </div>
 
               <h4 className="mb-7 text-xl font-bold capitalize text-slate-900 sm:text-2xl dark:text-neutral-100">
-                {(s?.techStack && (s.techStack.difficulty || s.techStack.level)) ? (s.techStack.difficulty || s.techStack.level) : 'Mock'} Session
+                {getInterviewSource(s) === 'HR' ? 'HR Round' : `${(s?.techStack && (s.techStack.difficulty || s.techStack.level)) ? (s.techStack.difficulty || s.techStack.level) : 'Mock'} Session`}
               </h4>
               <div className="mb-5 inline-flex w-fit rounded-full bg-slate-100 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-slate-600 dark:bg-neutral-800 dark:text-neutral-300">
                 {getInterviewSourceLabel(s)}
@@ -1077,7 +1092,7 @@ const Dashboard: React.FC = () => {
                               <div className="flex items-center gap-3">
                                 <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300"><MonitorCheck className="h-5 w-5" /></div>
                                 <div className="min-w-0">
-                                  <p className="font-black text-slate-900 dark:text-neutral-100">{item?.role || 'Interview'}</p>
+                                  <p className="font-black text-slate-900 dark:text-neutral-100">{getInterviewSource(item) === 'HR' ? `HR Interview - ${item?.role || 'General'}` : item?.role || 'Interview'}</p>
                                   <p className="text-xs font-bold text-slate-400 dark:text-neutral-500">{item?.createdAt ? new Date(item.createdAt).toLocaleDateString() : 'Recent'}</p>
                                 </div>
                               </div>

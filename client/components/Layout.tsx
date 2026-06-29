@@ -11,7 +11,7 @@ type AptitudeCategory = { id: string; label: string; description: string; items:
 
 const mockInterviewItems: MenuItem[] = [
   { label: 'Technical Interview', to: '/interview-form?type=technical', description: 'Role-based technical practice' },
-  { label: 'HR Interview', to: '/interview-form?type=hr', description: 'Behavioral and culture fit rounds' },
+  { label: 'HR Interview', to: '/hr-interview', description: 'Behavioral and culture fit rounds' },
   { label: 'Resume Based Interview', to: '/resume-interview', description: 'Generate an interview from your resume' },
   { label: 'Spoken English Practice', to: '/interview-form?type=spoken-english', description: 'Fluency and confidence drills' },
 ];

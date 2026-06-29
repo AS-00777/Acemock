@@ -302,6 +302,23 @@ function speakProctoringWarning(message: string) {
   window.speechSynthesis.speak(utterance);
 }
 
+function debugInterview(...args: unknown[]) {
+  if (typeof window !== "undefined" && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) {
+    console.debug("[InterviewSession]", ...args);
+  }
+}
+
+function appendUniqueTranscript(current: string, next: string) {
+  const clean = next.replace(/\s+/g, " ").trim();
+  if (!clean) return current.trim();
+  const base = current.replace(/\s+/g, " ").trim();
+  if (!base) return clean;
+  const baseLower = base.toLowerCase();
+  const cleanLower = clean.toLowerCase();
+  if (baseLower.endsWith(cleanLower)) return base;
+  return `${base} ${clean}`.trim();
+}
+
 export default function InterviewSession() {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -351,6 +368,10 @@ export default function InterviewSession() {
   const recordingTimerRef = useRef<number | null>(null);
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   const recognitionRef = useRef<any>(null);
+  const recognitionShouldRestartRef = useRef(false);
+  const finalTranscriptRef = useRef("");
+  const interimTranscriptRef = useRef("");
+  const lastFinalTranscriptRef = useRef("");
   const isRecordingRef = useRef(false);
   const isRecordingPausedRef = useRef(false);
   const micEnabledRef = useRef(true);
@@ -364,6 +385,9 @@ export default function InterviewSession() {
   const speechCompletionRef = useRef<(() => void) | null>(null);
   const speechSequenceRef = useRef(0);
   const transitionIndexRef = useRef(0);
+  const followUpRequestedQuestionRef = useRef<number | null>(null);
+  const followUpRequestInFlightRef = useRef(false);
+  const spokenFollowUpRef = useRef<string>("");
 
   useEffect(() => {
     isRecordingRef.current = isRecording;
@@ -391,6 +415,7 @@ export default function InterviewSession() {
     stopRecordingTimer();
     setIsRecording(false);
     setIsRecordingPaused(false);
+    isRecordingRef.current = false;
     isRecordingPausedRef.current = false;
     setRecordingSeconds(0);
   }, [stopRecordingTimer]);
@@ -444,6 +469,46 @@ export default function InterviewSession() {
     if (videoElRef.current) videoElRef.current.srcObject = null;
   }, []);
 
+  const cleanupInterviewMedia = useCallback(() => {
+    recognitionShouldRestartRef.current = false;
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    speechCompletionRef.current?.();
+    speechCompletionRef.current = null;
+    setIsQuestionSpeaking(false);
+    if (recognitionRef.current) {
+      recognitionRef.current.onend = null;
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+    }
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      try {
+        recorder.stop();
+      } catch {}
+    }
+    mediaRecorderRef.current = null;
+    stopRecordingTimer();
+    setIsRecording(false);
+    setIsRecordingPaused(false);
+    isRecordingRef.current = false;
+    isRecordingPausedRef.current = false;
+    setRecordingSeconds(0);
+    stopAnswerAudioTracks();
+    stopMediaTracks();
+  }, [stopAnswerAudioTracks, stopMediaTracks, stopRecordingTimer]);
+
+  const resetAnswerDraft = useCallback(() => {
+    finalTranscriptRef.current = "";
+    interimTranscriptRef.current = "";
+    lastFinalTranscriptRef.current = "";
+    audioChunksRef.current = [];
+    setAnswerText("");
+    setInterimTranscript("");
+    setSelectedOption("");
+    setError(null);
+  }, []);
+
   const captureMonitoringFrame = useCallback(() => {
     const video = videoElRef.current;
     if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return null;
@@ -486,25 +551,11 @@ export default function InterviewSession() {
   const stopForProctoringBan = useCallback((result: ProctoringResponse) => {
     terminatedByProctoringRef.current = true;
     completeRequestedRef.current = true;
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
-    if (recognitionRef.current) {
-      recognitionRef.current.onend = null;
-      try {
-        recognitionRef.current.stop();
-      } catch {}
-    }
-    resetRecordingState();
-    if (mediaRecorderRef.current?.state === "recording") {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch {}
-    }
-    stopAnswerAudioTracks();
     setIsTimerActive(false);
-    stopMediaTracks();
+    cleanupInterviewMedia();
     showProctoringWarning(result);
     window.setTimeout(() => navigate("/dashboard"), 1200);
-  }, [navigate, resetRecordingState, showProctoringWarning, stopAnswerAudioTracks, stopMediaTracks]);
+  }, [cleanupInterviewMedia, navigate, showProctoringWarning]);
 
   useEffect(() => {
     // init: speech recognition + getUserMedia (once)
@@ -517,19 +568,51 @@ export default function InterviewSession() {
       rec.lang = "en-US";
       rec.onresult = (event: any) => {
         let interimText = "";
+        let finalText = finalTranscriptRef.current;
         for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const part = event.results[i][0].transcript;
+          const part = String(event.results[i][0].transcript || "").trim();
+          if (!part) continue;
           if (event.results[i].isFinal) {
-            setAnswerText((prev) => (prev + " " + part).trim());
-            setInterimTranscript("");
+            const resultKey = `${i}:${part.toLowerCase()}`;
+            if (lastFinalTranscriptRef.current !== resultKey) {
+              finalText = appendUniqueTranscript(finalText, part);
+              lastFinalTranscriptRef.current = resultKey;
+            }
           } else {
-            interimText += part;
+            interimText = `${interimText} ${part}`.trim();
           }
         }
+        finalTranscriptRef.current = finalText;
+        interimTranscriptRef.current = interimText;
+        setAnswerText(finalText);
         setInterimTranscript(interimText);
+        debugInterview("transcript updated", { finalLength: finalText.length, interimLength: interimText.length });
+      };
+      rec.onerror = (event: any) => {
+        const type = String(event?.error || "");
+        debugInterview("recognition error", type);
+        if (type === "no-speech") {
+          setError("We could not hear you clearly. Please try again.");
+          return;
+        }
+        if (type === "audio-capture") {
+          recognitionShouldRestartRef.current = false;
+          setError("Voice capture is unavailable. Please allow microphone access and try again.");
+          return;
+        }
+        if (type === "not-allowed" || type === "service-not-allowed") {
+          recognitionShouldRestartRef.current = false;
+          setError("Voice capture is unavailable. Please allow microphone access and try again.");
+          return;
+        }
+        if (type === "network") {
+          recognitionShouldRestartRef.current = false;
+          setError("Voice capture is unavailable. Please allow microphone access and try again.");
+        }
       };
       rec.onend = () => {
-        if (isRecordingRef.current && !isRecordingPausedRef.current && micEnabledRef.current) {
+        debugInterview("recognition ended");
+        if (recognitionShouldRestartRef.current && isRecordingRef.current && !isRecordingPausedRef.current && micEnabledRef.current) {
           try {
             rec.start();
           } catch {}
@@ -540,35 +623,29 @@ export default function InterviewSession() {
 
     ensureMediaStream().catch((e) => {
       console.error("Media access error:", e);
-      setError("Camera/Mic permission is required to continue.");
+      setError("Voice capture is unavailable. Please allow microphone access and try again.");
     });
 
     return () => {
-      if (proctoringToastTimerRef.current) {
-        window.clearTimeout(proctoringToastTimerRef.current);
-      }
-      if (recognitionRef.current) {
-        recognitionRef.current.onend = null;
-        try {
-          recognitionRef.current.stop();
-        } catch {}
-      }
-      if (window.speechSynthesis) window.speechSynthesis.cancel();
-      stopRecordingTimer();
-      if (mediaRecorderRef.current?.state === "recording") {
-        try {
-          mediaRecorderRef.current.stop();
-        } catch {}
-      }
-      stopAnswerAudioTracks();
-      stopMediaTracks();
+      if (proctoringToastTimerRef.current) window.clearTimeout(proctoringToastTimerRef.current);
+      cleanupInterviewMedia();
     };
-  }, [ensureMediaStream, stopAnswerAudioTracks, stopMediaTracks, stopRecordingTimer]);
+  }, [cleanupInterviewMedia, ensureMediaStream]);
 
   useEffect(() => {
     // Persist stream across re-renders; re-attach whenever the video element exists.
     attachVideoStream();
   });
+
+  useEffect(() => {
+    const cleanup = () => cleanupInterviewMedia();
+    window.addEventListener("pagehide", cleanup);
+    window.addEventListener("beforeunload", cleanup);
+    return () => {
+      window.removeEventListener("pagehide", cleanup);
+      window.removeEventListener("beforeunload", cleanup);
+    };
+  }, [cleanupInterviewMedia]);
 
   useEffect(() => {
     const stream = streamRef.current;
@@ -633,6 +710,7 @@ export default function InterviewSession() {
     if (!stream) return;
     stream.getAudioTracks().forEach((t) => (t.enabled = micEnabled));
     if (!micEnabled && isRecording) {
+      recognitionShouldRestartRef.current = false;
       try {
         recognitionRef.current?.stop();
       } catch {}
@@ -730,12 +808,19 @@ export default function InterviewSession() {
       setError("Wait for the AI to finish speaking before starting your answer.");
       return;
     }
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
-      setError("Audio recording is not supported in this browser. You can still type your answer.");
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError("Voice capture is unavailable. Please allow microphone access and try again.");
+      return;
+    }
+    if (!recognitionRef.current) {
+      setError("Voice capture is unavailable. Please allow microphone access and try again.");
       return;
     }
 
     setError(null);
+    finalTranscriptRef.current = answerText.trim();
+    interimTranscriptRef.current = "";
+    setInterimTranscript("");
     audioChunksRef.current = [];
 
     try {
@@ -747,37 +832,52 @@ export default function InterviewSession() {
           channelCount: 1,
         },
       });
+      const audioTrack = stream.getAudioTracks()[0];
+      if (!audioTrack || audioTrack.readyState !== "live") {
+        throw new Error("No active microphone track was found.");
+      }
       answerAudioStreamRef.current = stream;
 
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : "audio/webm";
-      const recorder = new MediaRecorder(stream, { mimeType });
-      recorder.ondataavailable = (event) => {
-        if (!isRecordingPausedRef.current && event.data.size > 0) audioChunksRef.current.push(event.data);
-      };
-      recorder.onerror = () => {
-        resetRecordingState();
-        stopAnswerAudioTracks();
-        setError("Recording failed. Please try again.");
-      };
-      recorder.start(250);
-      mediaRecorderRef.current = recorder;
+      if (typeof MediaRecorder !== "undefined") {
+        const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : "audio/webm";
+        const recorder = new MediaRecorder(stream, { mimeType });
+        recorder.ondataavailable = (event) => {
+          if (!isRecordingPausedRef.current && event.data.size > 0) audioChunksRef.current.push(event.data);
+        };
+        recorder.onerror = () => {
+          mediaRecorderRef.current = null;
+          setError("Audio recording failed, but transcript capture can continue.");
+        };
+        recorder.start(250);
+        mediaRecorderRef.current = recorder;
+      } else {
+        mediaRecorderRef.current = null;
+        setError("Audio recording is not supported in this browser. Voice transcript capture will still be attempted.");
+      }
 
       try {
         if (recognitionRef.current) {
+          recognitionShouldRestartRef.current = true;
           recognitionRef.current.onend = () => {
-            if (isRecordingRef.current && !isRecordingPausedRef.current && micEnabledRef.current) {
+            debugInterview("recognition ended");
+            if (recognitionShouldRestartRef.current && isRecordingRef.current && !isRecordingPausedRef.current && micEnabledRef.current) {
               try {
                 recognitionRef.current?.start();
               } catch {}
             }
           };
+          recognitionRef.current.start();
+          debugInterview("recognition started");
         }
-        recognitionRef.current?.start();
-      } catch {}
+      } catch {
+        recognitionShouldRestartRef.current = false;
+        setError("Voice capture is unavailable. Please allow microphone access and try again.");
+      }
 
       setIsRecording(true);
+      isRecordingRef.current = true;
       setIsRecordingPaused(false);
       isRecordingPausedRef.current = false;
       setRecordingSeconds(0);
@@ -793,7 +893,7 @@ export default function InterviewSession() {
         err?.name === "PermissionDeniedError" ||
         err?.name === "SecurityError";
       const msg = denied
-        ? "Microphone permission was denied. Allow mic access or use the text answer fallback."
+        ? "Voice capture is unavailable. Please allow microphone access and try again."
         : "Could not start microphone recording. Please check your mic and try again.";
       setError(msg);
       toastError(msg);
@@ -807,10 +907,12 @@ export default function InterviewSession() {
     micEnabled,
     resetRecordingState,
     stopAnswerAudioTracks,
+    answerText,
   ]);
 
   const stopAnswerRecording = useCallback(async () => {
     stopRecordingTimer();
+    recognitionShouldRestartRef.current = false;
     try {
       if (recognitionRef.current) recognitionRef.current.onend = null;
       recognitionRef.current?.stop();
@@ -818,6 +920,7 @@ export default function InterviewSession() {
 
     const recorder = mediaRecorderRef.current;
     if (!recorder || recorder.state === "inactive") {
+      mediaRecorderRef.current = null;
       resetRecordingState();
       stopAnswerAudioTracks();
       return new Blob(audioChunksRef.current, { type: "audio/webm" });
@@ -829,6 +932,7 @@ export default function InterviewSession() {
       };
       recorder.onerror = () => reject(new Error("Recording failed."));
       try {
+        if (recorder.state === "recording" && typeof recorder.requestData === "function") recorder.requestData();
         recorder.stop();
       } catch (err) {
         reject(err);
@@ -844,6 +948,7 @@ export default function InterviewSession() {
   const pauseAnswerRecording = useCallback(() => {
     if (!isRecording || isRecordingPaused) return;
     const recorder = mediaRecorderRef.current;
+    recognitionShouldRestartRef.current = false;
     isRecordingPausedRef.current = true;
     setIsRecordingPaused(true);
     stopRecordingTimer();
@@ -864,9 +969,11 @@ export default function InterviewSession() {
       if (recorder?.state === "paused" && typeof recorder.resume === "function") recorder.resume();
     } catch {}
     try {
+      recognitionShouldRestartRef.current = true;
       if (recognitionRef.current) {
         recognitionRef.current.onend = () => {
-          if (isRecordingRef.current && !isRecordingPausedRef.current && micEnabledRef.current) {
+          debugInterview("recognition ended");
+          if (recognitionShouldRestartRef.current && isRecordingRef.current && !isRecordingPausedRef.current && micEnabledRef.current) {
             try {
               recognitionRef.current?.start();
             } catch {}
@@ -874,6 +981,7 @@ export default function InterviewSession() {
         };
       }
       recognitionRef.current?.start();
+      debugInterview("recognition started");
     } catch {}
     if (recordingTimerRef.current === null) {
       recordingTimerRef.current = window.setInterval(() => {
@@ -913,6 +1021,9 @@ export default function InterviewSession() {
       stopAnswerAudioTracks();
       resetRecordingState();
     }
+    finalTranscriptRef.current = "";
+    interimTranscriptRef.current = "";
+    audioChunksRef.current = [];
     setAnswerText("");
     setSelectedOption("");
     setInterimTranscript("");
@@ -957,7 +1068,7 @@ export default function InterviewSession() {
     setError(null);
     try {
       await api.post<CompleteResponse>(`/interview/${interviewId}/complete`, {});
-      stopMediaTracks();
+      cleanupInterviewMedia();
       navigate(`/result/${interviewId}`);
     } catch (err: any) {
       completeRequestedRef.current = false;
@@ -967,7 +1078,7 @@ export default function InterviewSession() {
       toastError(msg);
       throw err;
     }
-  }, [interviewId, logout, navigate, stopMediaTracks]);
+  }, [cleanupInterviewMedia, interviewId, logout, navigate]);
 
   const fetchNextQuestion = useCallback(
     async (nextNumber: number, difficultyOverride?: Difficulty) => {
@@ -993,6 +1104,10 @@ export default function InterviewSession() {
         setTotalQuestions((prev) => Math.max(prev, nextNumber));
         setSavedQuestionId(null);
         setSavedAnswerId(null);
+        resetAnswerDraft();
+        followUpRequestedQuestionRef.current = null;
+        followUpRequestInFlightRef.current = false;
+        spokenFollowUpRef.current = "";
         setInterviewerReaction("");
         setFollowUpQuestion(null);
         setIsFollowUpActive(false);
@@ -1006,7 +1121,7 @@ export default function InterviewSession() {
         throw err;
       }
     },
-    [completeInterview, interviewDifficulty, interviewId]
+    [completeInterview, interviewDifficulty, interviewId, resetAnswerDraft]
   );
 
   const loadOrGenerateQuestion = useCallback(async () => {
@@ -1054,8 +1169,11 @@ export default function InterviewSession() {
       };
       setCurrentQuestion(resumedQuestion);
       setQuestionNumber(outstandingFollowUpIndex + 1);
+      resetAnswerDraft();
       setSavedQuestionId(q.id);
       setSavedAnswerId(a.id);
+      followUpRequestedQuestionRef.current = q.id;
+      spokenFollowUpRef.current = `${q.id}:${a.followUpQuestion || ""}`;
       setInterviewerReaction(a.interviewerReaction || "Okay, let's explore this a little further.");
       setFollowUpQuestion(a.followUpQuestion || null);
       setIsFollowUpActive(true);
@@ -1084,8 +1202,12 @@ export default function InterviewSession() {
       };
       setCurrentQuestion(pendingQuestion);
       setQuestionNumber(pendingIndex + 1);
+      resetAnswerDraft();
       setSavedQuestionId(null);
       setSavedAnswerId(null);
+      followUpRequestedQuestionRef.current = null;
+      followUpRequestInFlightRef.current = false;
+      spokenFollowUpRef.current = "";
       setTimeLeft(getQuestionTimerSeconds(pendingQuestion, nextInterviewDifficulty));
       setIsTimerActive(true);
       return;
@@ -1098,7 +1220,7 @@ export default function InterviewSession() {
 
     const nextNumber = answered.length + 1;
     await fetchNextQuestion(nextNumber, nextInterviewDifficulty);
-  }, [completeInterview, fetchNextQuestion, interviewId, navigate]);
+  }, [completeInterview, fetchNextQuestion, interviewId, navigate, resetAnswerDraft]);
 
   useEffect(() => {
     if (!Number.isFinite(interviewId) || interviewId <= 0) {
@@ -1117,24 +1239,18 @@ export default function InterviewSession() {
   }, [interviewId, loadOrGenerateQuestion, logout, navigate]);
 
   const handleFinishEarly = useCallback(() => {
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
-    setIsQuestionSpeaking(false);
-    if (recognitionRef.current) {
-      recognitionRef.current.onend = null;
-      try {
-        recognitionRef.current.stop();
-      } catch {}
-    }
-    if (mediaRecorderRef.current?.state === "recording") {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch {}
-    }
-    stopAnswerAudioTracks();
-    resetRecordingState();
-    stopMediaTracks();
+    cleanupInterviewMedia();
     navigate("/dashboard");
-  }, [navigate, resetRecordingState, stopAnswerAudioTracks, stopMediaTracks]);
+  }, [cleanupInterviewMedia, navigate]);
+
+  const getFinalVerbalAnswer = useCallback(() => {
+    const stateText = answerText.trim();
+    const finalText = finalTranscriptRef.current.trim();
+    const base = stateText.length >= finalText.length ? stateText : finalText;
+    const latestInterim = (interimTranscriptRef.current || interimTranscript).trim();
+    if (!latestInterim || base.includes(latestInterim)) return base.trim();
+    return `${base} ${latestInterim}`.trim();
+  }, [answerText, interimTranscript]);
 
   const submitAndNext = useCallback(async (
     mode: "manual" | "auto" = "manual",
@@ -1159,25 +1275,39 @@ export default function InterviewSession() {
 
     if (window.speechSynthesis) window.speechSynthesis.cancel();
     setIsQuestionSpeaking(false);
+    const answerBeforeStopping = getFinalVerbalAnswer();
     let audioBlob = options.audioBlob;
     if (isRecording && !audioBlob) {
       try {
         audioBlob = await stopAnswerRecording();
-        if (!audioBlob.size) throw new Error("No audio captured. Please record your answer again.");
       } catch (err: any) {
-        const msg = err?.message || "Recording failed. Please try again.";
-        setError(msg);
-        toastError(msg);
-        submitInFlightRef.current = false;
-        return;
+        const fallbackAnswer = getFinalVerbalAnswer() || answerBeforeStopping;
+        if (fallbackAnswer && !isCodeAnswerQuestion(currentQuestion) && currentQuestion.type !== "mcq") {
+          audioBlob = undefined;
+        } else {
+          const msg = err?.message || "Recording failed. Please try again.";
+          setError(msg);
+          toastError(msg);
+          submitInFlightRef.current = false;
+          return;
+        }
       }
     } else if (recognitionRef.current) {
+      recognitionShouldRestartRef.current = false;
       recognitionRef.current.onend = null;
       try {
         recognitionRef.current.stop();
       } catch {}
       stopAnswerAudioTracks();
       resetRecordingState();
+    }
+    const finalVerbalAnswer = getFinalVerbalAnswer();
+    if (!isCodeAnswerQuestion(currentQuestion) && currentQuestion.type !== "mcq" && !finalVerbalAnswer) {
+      const msg = "No answer detected. Please speak again or type your answer.";
+      setError(msg);
+      toastError(msg);
+      submitInFlightRef.current = false;
+      return;
     }
     setIsTimerActive(false);
     const isLastQuestion = questionNumber >= totalQuestions;
@@ -1196,7 +1326,14 @@ export default function InterviewSession() {
     };
 
     if (isFollowUpActive) {
-      const followUpAnswer = answerText.trim() || "(No verbal response)";
+      const followUpAnswer = finalVerbalAnswer;
+      if (!followUpAnswer) {
+        const msg = "No answer detected. Please speak again or type your answer.";
+        setError(msg);
+        toastError(msg);
+        submitInFlightRef.current = false;
+        return;
+      }
       setBusy("saving");
       setError(null);
       try {
@@ -1208,8 +1345,7 @@ export default function InterviewSession() {
         });
         setIsFollowUpActive(false);
         setFollowUpQuestion(null);
-        setAnswerText("");
-        setInterimTranscript("");
+        resetAnswerDraft();
         if (isLastQuestion) {
           await speakInterviewerTurn(nextTransition());
           await completeInterview();
@@ -1233,7 +1369,11 @@ export default function InterviewSession() {
       try {
         if (audioBlob) {
           if (!savedAnswerId) throw new Error("Saved answer was not found for audio upload.");
-          await uploadAudioAnswer(audioBlob, savedAnswerId);
+          try {
+            await uploadAudioAnswer(audioBlob, savedAnswerId);
+          } catch (audioErr) {
+            console.warn("Audio upload failed after answer was saved", audioErr);
+          }
         }
         if (isLastQuestion) {
           await speakInterviewerTurn(nextTransition());
@@ -1265,13 +1405,14 @@ export default function InterviewSession() {
     } else if (currentQuestion.type === "mcq") {
       payload.answerText = selectedOption || "(No selection)";
     } else {
-      payload.answerText = answerText.trim() || "(No verbal response)";
+      payload.answerText = finalVerbalAnswer;
     }
 
     setBusy("saving");
     setError(null);
     try {
       const answerResponse = await api.post<AnswerResponse>(`/interview/${interviewId}/answer`, payload);
+      debugInterview("answer submitted", { questionId: currentQuestion.id, answerLength: String(payload.answerText || "").length });
 
       setSavedQuestionId(currentQuestion.id);
       setSavedAnswerId(answerResponse.answer.id);
@@ -1281,12 +1422,16 @@ export default function InterviewSession() {
 
       let submittedAnswerText = payload.answerText ?? "";
       if (audioBlob) {
-        const audioResponse = await uploadAudioAnswer(audioBlob, answerResponse.answer.id);
-        const backendTranscript =
-          audioResponse.correctedTranscript?.trim() ||
-          audioResponse.transcript?.trim() ||
-          audioResponse.rawTranscript?.trim();
-        if (backendTranscript) submittedAnswerText = backendTranscript;
+        try {
+          const audioResponse = await uploadAudioAnswer(audioBlob, answerResponse.answer.id);
+          const backendTranscript =
+            audioResponse.correctedTranscript?.trim() ||
+            audioResponse.transcript?.trim() ||
+            audioResponse.rawTranscript?.trim();
+          if (backendTranscript) submittedAnswerText = backendTranscript;
+        } catch (audioErr) {
+          console.warn("Audio upload failed; continuing with captured transcript", audioErr);
+        }
       }
 
       setTranscript((prev) => [
@@ -1301,9 +1446,7 @@ export default function InterviewSession() {
         },
       ]);
 
-      setAnswerText("");
-      setSelectedOption("");
-      setInterimTranscript("");
+      resetAnswerDraft();
       setCode("");
       setTimeLeft(getQuestionTimerSeconds(currentQuestion, interviewDifficulty));
 
@@ -1312,6 +1455,16 @@ export default function InterviewSession() {
       const words = answerForFollowUp.split(/\s+/).filter(Boolean);
       const likelyNeedsCheck = words.length < 45 || /\b(i don'?t know|not sure|no idea|maybe|probably|something|stuff|it depends)\b/i.test(answerForFollowUp);
       if (mode !== "auto" && timeLeft > 0 && eligibleType && likelyNeedsCheck) {
+        if (followUpRequestedQuestionRef.current === currentQuestion.id || followUpRequestInFlightRef.current) {
+          const reaction = nextTransition();
+          setInterviewerReaction(reaction);
+          await speakInterviewerTurn(reaction);
+          if (!isLastQuestion) await fetchNextQuestion(questionNumber + 1);
+          else await completeInterview();
+          return;
+        }
+        followUpRequestedQuestionRef.current = currentQuestion.id;
+        followUpRequestInFlightRef.current = true;
         setIsGeneratingFollowUp(true);
         try {
           const decision = await api.post<FollowUpResponse>(`/interview/${interviewId}/follow-up`, {
@@ -1328,7 +1481,11 @@ export default function InterviewSession() {
             setIsTimerActive(true);
             setBusy(null);
             setIsGeneratingFollowUp(false);
-            await speakInterviewerTurn(decision.interviewerReaction, decision.followUpQuestion);
+            const spokenKey = `${currentQuestion.id}:${decision.followUpQuestion}`;
+            if (spokenFollowUpRef.current !== spokenKey) {
+              spokenFollowUpRef.current = spokenKey;
+              await speakInterviewerTurn(decision.interviewerReaction, decision.followUpQuestion);
+            }
             return;
           }
           await speakInterviewerTurn(nextTransition());
@@ -1337,6 +1494,7 @@ export default function InterviewSession() {
           setInterviewerReaction(fallback);
           await speakInterviewerTurn(fallback);
         } finally {
+          followUpRequestInFlightRef.current = false;
           setIsGeneratingFollowUp(false);
         }
       } else {
@@ -1366,6 +1524,7 @@ export default function InterviewSession() {
     completeInterview,
     currentQuestion,
     fetchNextQuestion,
+    getFinalVerbalAnswer,
     interviewDifficulty,
     interviewId,
     language,
@@ -1383,6 +1542,7 @@ export default function InterviewSession() {
     isRecording,
     isQuestionSpeaking,
     isFollowUpActive,
+    resetAnswerDraft,
     speakInterviewerTurn,
     timeLeft,
   ]);

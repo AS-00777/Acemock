@@ -1133,6 +1133,7 @@ export async function generateInterviewQuestionsBatch(input: {
     "Never write phrases such as 'Implement solution', 'using the selected technology', or 'based on the selected skill'.",
     "For theory and scenario questions, omit compiler metadata. Practical implementation questions must include constraints and expectedOutput but may omit compiler-only test metadata.",
     "Do not repeat or closely paraphrase questions.",
+    "Coding questions must be unique by problem description and test-case pattern; never reuse the same coding problem or identical test cases twice.",
     "Return STRICT JSON array only. No markdown.",
     "Each item must have this shape (compiler metadata remains required for coding items):",
     `{"questionText":"","expectedAnswer":"","expectedConcepts":[],"rubricFocus":[],"difficulty":"${input.difficulty}","topic":"","questionType":"theory","skill":"","language":"","starterCode":"","visibleTestCases":[],"hiddenTestCases":[],"constraints":[],"expectedOutput":"","evaluationType":"","options":[],"correctOption":"","explanation":"","expectedTimeComplexity":"","expectedSpaceComplexity":""}`,
@@ -1435,7 +1436,7 @@ function buildFallbackAnswerEvaluation(input: InterviewBatchAnswerInput): Interv
       ? testRun.ok
         ? `Code execution passed ${testRun.passed}/${testRun.total} test cases. Fallback scoring also considered code structure and explanation clarity.`
         : `Code execution failed: ${testRun.error}`
-      : "No stored test cases were available at completion, so fallback coding scoring considered code structure, expected concepts, and explanation clarity.";
+      : "Correctness is estimated from the submitted approach because automated test execution is not enabled. Rubric scoring considered logic, approach, syntax quality, edge case awareness, and explanation quality.";
   } else {
     const relevance = clampNumber(Math.max(baselineMeaning, questionRelevance * 0.45 + semanticSimilarity * 0.3 + conceptCoverage * 0.25), 0, 100, baselineMeaning);
     technicalAccuracy = clampNumber(Math.max(technicalAccuracy, relevance >= 70 ? 65 : technicalAccuracy), 0, 100, technicalAccuracy);
@@ -1535,6 +1536,13 @@ function coerceBatchAnswerEvaluation(
     ? normalizeCodingFactorScores(raw.factorScores ?? raw.factor_scores, fallback.factorScores as CodingFactorScores)
     : normalizeTheoryFactorScores(raw.factorScores ?? raw.factor_scores, fallback.factorScores as TheoryFactorScores);
   if (questionType === "coding" && fallback.correctnessLocked) {
+    (factorScores as CodingFactorScores).correctness = (fallback.factorScores as CodingFactorScores).correctness;
+  } else if (
+    questionType === "coding" &&
+    !fallback.correctnessLocked &&
+    (fallback.factorScores as CodingFactorScores).correctness > 0 &&
+    (factorScores as CodingFactorScores).correctness === 0
+  ) {
     (factorScores as CodingFactorScores).correctness = (fallback.factorScores as CodingFactorScores).correctness;
   }
   const factorScore100 = questionType === "coding"
@@ -1708,6 +1716,7 @@ export async function evaluateInterviewBatch(input: {
     "If an answer is short but technically correct, do not give extremely low marks.",
     "For coding, prioritize backendHiddenTestExecutionResult when available. If it is available, do not independently judge correctness.",
     "When no test execution result exists, evaluate submitted code or SQL statically for correctness, logic, edge cases, code quality, and any explanation. Do not require Judge0 or executed tests.",
+    "If automated test execution is not enabled and code was submitted, do not report 0% correctness. Estimate correctness from the submitted approach and explain that it is rubric-based.",
     "Each factorScores value must be a number from 0 to 100.",
     "Use NLP metrics as communication evidence, not as the only scoring basis.",
     "aiScore is your answer-quality score before NLP adjustment. finalScore may adjust aiScore using NLP clarity/fluency evidence.",

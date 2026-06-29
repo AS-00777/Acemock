@@ -55,6 +55,11 @@ type CompletedAptitudeActivityRow = RowDataPacket & {
   activity_date: Date | string;
 };
 
+type InterviewActivityAggregateRow = RowDataPacket & {
+  activity_date: Date | string;
+  interview_count: number | string;
+};
+
 export type NextBadgeProgress = {
   code: string;
   name: string;
@@ -128,10 +133,36 @@ const badgeProgress: Record<string, (stats: BadgeStats) => { current: number; ta
 
 const aptitudeBadgeCodes = ["FIRST_APTITUDE", "SCORE_90_APTITUDE"];
 const technicalAptitudeSections = new Set(["React Engineer", "DevOps Engineer", "AI & ML", "SAP Engineer"]);
+const activeBackfillsByUserId = new Set<string>();
 
 function isMissingTableError(error: unknown) {
   const code = (error as { code?: string })?.code;
   return code === "ER_NO_SUCH_TABLE" || code === "ER_BAD_FIELD_ERROR";
+}
+
+function isDeadlockError(error: unknown) {
+  const err = error as { code?: string; errno?: number };
+  return err?.code === "ER_LOCK_DEADLOCK" || err?.errno === 1213;
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runWithDeadlockRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
+  const delays = [100, 250, 500];
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= delays.length; attempt += 1) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (!isDeadlockError(error) || attempt === delays.length) break;
+      console.warn(`[badge] ${label} deadlocked; retrying`, { attempt: attempt + 1, nextDelayMs: delays[attempt] });
+      await delay(delays[attempt]);
+    }
+  }
+  throw lastError;
 }
 
 function formatLocalDateKey(date: Date) {
@@ -241,27 +272,54 @@ function isTechnicalAptitudeActivity(row: Pick<CompletedAptitudeActivityRow, "ti
 async function syncInterviewDailyActivityFromEvents(userId: string | number) {
   const userKey = String(userId);
 
-  await exec(
-    `UPDATE user_daily_activity
-     SET interview_count = 0,
-         total_activity_count =
-           aptitude_count + technical_mcq_count + resume_scan_count + spoken_practice_count
-     WHERE user_id = ?`,
-    [userKey]
-  );
+  await runWithDeadlockRetry(async () => {
+    const aggregates = await query<InterviewActivityAggregateRow[]>(
+      `SELECT DATE_FORMAT(activity_date, '%Y-%m-%d') AS activity_date,
+              COUNT(*) AS interview_count
+       FROM user_activity_events
+       WHERE user_id = ? AND activity_type = 'interview'
+       GROUP BY activity_date
+       ORDER BY activity_date ASC`,
+      [userKey]
+    );
 
-  await exec(
-    `INSERT INTO user_daily_activity (user_id, activity_date, interview_count, total_activity_count)
-     SELECT user_id, activity_date, COUNT(*) AS interview_count, COUNT(*) AS total_activity_count
-     FROM user_activity_events
-     WHERE user_id = ? AND activity_type = 'interview'
-     GROUP BY user_id, activity_date
-     ON DUPLICATE KEY UPDATE
-       interview_count = VALUES(interview_count),
-       total_activity_count =
-         VALUES(interview_count) + aptitude_count + technical_mcq_count + resume_scan_count + spoken_practice_count`,
-    [userKey]
-  );
+    const activeDates = aggregates.map((row) => toDateOnly(row.activity_date));
+    const existingDates = await query<(RowDataPacket & { activity_date: Date | string })[]>(
+      `SELECT DATE_FORMAT(activity_date, '%Y-%m-%d') AS activity_date
+       FROM user_daily_activity
+       WHERE user_id = ? AND interview_count > 0
+       ORDER BY activity_date ASC`,
+      [userKey]
+    );
+
+    const activeDateSet = new Set(activeDates);
+    for (const row of existingDates) {
+      const activityDate = toDateOnly(row.activity_date);
+      if (activeDateSet.has(activityDate)) continue;
+      await exec(
+        `UPDATE user_daily_activity
+         SET interview_count = 0,
+             total_activity_count =
+               aptitude_count + technical_mcq_count + resume_scan_count + spoken_practice_count
+         WHERE user_id = ? AND activity_date = ?`,
+        [userKey, activityDate]
+      );
+    }
+
+    for (const row of aggregates) {
+      const activityDate = toDateOnly(row.activity_date);
+      const interviewCount = Number(row.interview_count ?? 0);
+      await exec(
+        `INSERT INTO user_daily_activity (user_id, activity_date, interview_count, total_activity_count)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           interview_count = VALUES(interview_count),
+           total_activity_count =
+             VALUES(interview_count) + aptitude_count + technical_mcq_count + resume_scan_count + spoken_practice_count`,
+        [userKey, activityDate, interviewCount, interviewCount]
+      );
+    }
+  }, `syncInterviewDailyActivityFromEvents:${userKey}`);
 }
 
 export async function recordDailyActivity(
@@ -275,103 +333,116 @@ export async function recordDailyActivity(
 
   if (hasSource) {
     try {
-      const connection = await pool.getConnection();
-      try {
-        await connection.beginTransaction();
-        const sourceType = String(options.sourceType);
-        const sourceId = String(options.sourceId);
-        const [existingEvents] = await connection.execute<(RowDataPacket & { activity_date: string })[]>(
-          `SELECT DATE_FORMAT(activity_date, '%Y-%m-%d') AS activity_date
-           FROM user_activity_events
-           WHERE user_id = ? AND activity_type = ? AND source_type = ? AND source_id = ?
-           LIMIT 1
-           FOR UPDATE`,
-          [
-            String(userId),
-            activityType,
-            sourceType,
-            sourceId,
-          ]
-        );
-
-        const previousDate = existingEvents[0]?.activity_date ?? null;
-
-        if (!previousDate) {
-          await connection.execute(
-            `INSERT INTO user_activity_events
-               (user_id, activity_type, source_type, source_id, activity_date)
-             VALUES (?, ?, ?, ?, ?)`,
-            [String(userId), activityType, sourceType, sourceId, activityDate]
+      return await runWithDeadlockRetry(async () => {
+        const connection = await pool.getConnection();
+        try {
+          await connection.beginTransaction();
+          const sourceType = String(options.sourceType);
+          const sourceId = String(options.sourceId);
+          const [existingEvents] = await connection.execute<(RowDataPacket & { activity_date: string })[]>(
+            `SELECT DATE_FORMAT(activity_date, '%Y-%m-%d') AS activity_date
+             FROM user_activity_events
+             WHERE user_id = ? AND activity_type = ? AND source_type = ? AND source_id = ?
+             LIMIT 1
+             FOR UPDATE`,
+            [
+              String(userId),
+              activityType,
+              sourceType,
+              sourceId,
+            ]
           );
 
-          await connection.execute(
-            `INSERT INTO user_daily_activity (user_id, activity_date, ${column}, total_activity_count)
-             VALUES (?, ?, 1, 1)
-             ON DUPLICATE KEY UPDATE
-               ${column} = ${column} + 1,
-               total_activity_count = total_activity_count + 1`,
-            [String(userId), activityDate]
-          );
+          const previousDate = existingEvents[0]?.activity_date ?? null;
+
+          if (!previousDate) {
+            await connection.execute(
+              `INSERT INTO user_activity_events
+                 (user_id, activity_type, source_type, source_id, activity_date)
+               VALUES (?, ?, ?, ?, ?)`,
+              [String(userId), activityType, sourceType, sourceId, activityDate]
+            );
+
+            await connection.execute(
+              `INSERT INTO user_daily_activity (user_id, activity_date, ${column}, total_activity_count)
+               VALUES (?, ?, 1, 1)
+               ON DUPLICATE KEY UPDATE
+                 ${column} = ${column} + 1,
+                 total_activity_count = total_activity_count + 1`,
+              [String(userId), activityDate]
+            );
+
+            await connection.commit();
+            return true;
+          }
+
+          if (previousDate !== activityDate) {
+            await connection.execute(
+              `UPDATE user_activity_events
+               SET activity_date = ?
+               WHERE user_id = ? AND activity_type = ? AND source_type = ? AND source_id = ?`,
+              [activityDate, String(userId), activityType, sourceType, sourceId]
+            );
+
+            const orderedDates = [previousDate, activityDate].sort();
+            for (const orderedDate of orderedDates) {
+              if (orderedDate === previousDate) {
+                await connection.execute(
+                  `UPDATE user_daily_activity
+                   SET ${column} = GREATEST(${column} - 1, 0),
+                       total_activity_count = GREATEST(total_activity_count - 1, 0)
+                   WHERE user_id = ? AND activity_date = ?`,
+                  [String(userId), previousDate]
+                );
+              } else {
+                await connection.execute(
+                  `INSERT INTO user_daily_activity (user_id, activity_date, ${column}, total_activity_count)
+                   VALUES (?, ?, 1, 1)
+                   ON DUPLICATE KEY UPDATE
+                     ${column} = ${column} + 1,
+                     total_activity_count = total_activity_count + 1`,
+                  [String(userId), activityDate]
+                );
+              }
+            }
+
+            await connection.commit();
+            return true;
+          }
 
           await connection.commit();
-          return true;
+          return false;
+        } catch (error) {
+          await connection.rollback();
+          throw error;
+        } finally {
+          connection.release();
         }
-
-        if (previousDate !== activityDate) {
-          await connection.execute(
-            `UPDATE user_activity_events
-             SET activity_date = ?
-             WHERE user_id = ? AND activity_type = ? AND source_type = ? AND source_id = ?`,
-            [activityDate, String(userId), activityType, sourceType, sourceId]
-          );
-
-          await connection.execute(
-            `UPDATE user_daily_activity
-             SET ${column} = GREATEST(${column} - 1, 0),
-                 total_activity_count = GREATEST(total_activity_count - 1, 0)
-             WHERE user_id = ? AND activity_date = ?`,
-            [String(userId), previousDate]
-          );
-
-          await connection.execute(
-            `INSERT INTO user_daily_activity (user_id, activity_date, ${column}, total_activity_count)
-             VALUES (?, ?, 1, 1)
-             ON DUPLICATE KEY UPDATE
-               ${column} = ${column} + 1,
-               total_activity_count = total_activity_count + 1`,
-            [String(userId), activityDate]
-          );
-
-          await connection.commit();
-          return true;
-        }
-
-        await connection.commit();
-        return false;
-      } catch (error) {
-        await connection.rollback();
-        throw error;
-      } finally {
-        connection.release();
-      }
+      }, `recordDailyActivity:${String(userId)}:${activityType}`);
     } catch (error) {
       if (isMissingTableError(error)) return false;
       throw error;
     }
   }
 
-  await exec(
-    `INSERT INTO user_daily_activity (user_id, activity_date, ${column}, total_activity_count)
-     VALUES (?, ?, 1, 1)
-     ON DUPLICATE KEY UPDATE
-       ${column} = ${column} + 1,
-       total_activity_count = total_activity_count + 1`,
-    [String(userId), activityDate]
+  await runWithDeadlockRetry(
+    () => exec(
+      `INSERT INTO user_daily_activity (user_id, activity_date, ${column}, total_activity_count)
+       VALUES (?, ?, 1, 1)
+       ON DUPLICATE KEY UPDATE
+         ${column} = ${column} + 1,
+         total_activity_count = total_activity_count + 1`,
+      [String(userId), activityDate]
+    ),
+    `recordDailyActivity:${String(userId)}:${activityType}`
   );
   return true;
 }
 
 export async function backfillUserActivitiesFromCompletedData(userId: string | number) {
+  const userKey = String(userId);
+  if (activeBackfillsByUserId.has(userKey)) return;
+  activeBackfillsByUserId.add(userKey);
   try {
     const internalUserId = await resolveInternalUserId(userId);
     if (!internalUserId) return;
@@ -383,16 +454,20 @@ export async function backfillUserActivitiesFromCompletedData(userId: string | n
        JOIN results r ON r.interview_id = i.id
        WHERE i.user_id = ?
          AND ${completedInterviewWhere("i")}
-         AND r.overall_score IS NOT NULL`,
+         AND r.overall_score IS NOT NULL
+       ORDER BY activity_date ASC, i.id ASC`,
       [internalUserId]
     );
 
     for (const row of rows) {
-      await recordDailyActivity(userId, "interview", {
-        sourceType: "interview",
-        sourceId: row.id,
-        activityDate: row.activity_date,
-      });
+      await runWithDeadlockRetry(
+        () => recordDailyActivity(userId, "interview", {
+          sourceType: "interview",
+          sourceId: row.id,
+          activityDate: row.activity_date,
+        }),
+        `backfillInterviewActivity:${userKey}:${row.id}`
+      );
     }
 
     await syncInterviewDailyActivityFromEvents(userId);
@@ -412,21 +487,34 @@ export async function backfillUserActivitiesFromCompletedData(userId: string | n
            FROM aptitude_attempts aa
            WHERE aa.test_id = at.id
            LIMIT 1
-         )`,
+         )
+       ORDER BY activity_date ASC, at.id ASC`,
       [internalUserId]
     );
 
     for (const row of aptitudeRows) {
       const activityType: ActivityType = isTechnicalAptitudeActivity(row) ? "technical_mcq" : "aptitude";
-      await recordDailyActivity(userId, activityType, {
-        sourceType: activityType === "technical_mcq" ? "technical_mcq_test" : "aptitude_test",
-        sourceId: row.id,
-        activityDate: row.activity_date,
-      });
+      await runWithDeadlockRetry(
+        () => recordDailyActivity(userId, activityType, {
+          sourceType: activityType === "technical_mcq" ? "technical_mcq_test" : "aptitude_test",
+          sourceId: row.id,
+          activityDate: row.activity_date,
+        }),
+        `backfillAptitudeActivity:${userKey}:${row.id}`
+      );
     }
   } catch (error) {
     if (isMissingTableError(error)) return;
+    if (isDeadlockError(error)) {
+      console.warn("[badge] activity backfill skipped after deadlock retries", {
+        userId: userKey,
+        message: String((error as Error)?.message ?? error),
+      });
+      return;
+    }
     throw error;
+  } finally {
+    activeBackfillsByUserId.delete(userKey);
   }
 }
 
