@@ -158,7 +158,9 @@ type CurrentQuestion = {
   options?: string[];
 };
 
-function isCodeAnswerQuestion(question: CurrentQuestion | null) {
+type CodeAnswerQuestion = CurrentQuestion & { type: Extract<QuestionType, "coding" | "code" | "sql" | "practical"> };
+
+function isCodeAnswerQuestion(question: CurrentQuestion | null): question is CodeAnswerQuestion {
   if (!question) return false;
   return question.type === "coding" || question.type === "code" || question.type === "sql" || question.type === "practical";
 }
