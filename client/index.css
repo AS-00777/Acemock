@@ -84,6 +84,87 @@
   margin-top: 0.25rem;
 }
 
+.auth-page .cl-formFieldRow {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  width: 100%;
+  max-width: none !important;
+}
+
+.auth-page .cl-formField {
+  display: flex !important;
+  min-width: 0;
+  width: 100%;
+  max-width: none !important;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.auth-page .cl-formField__emailAddress,
+.auth-page .cl-formField__password {
+  grid-column: 1 / -1;
+}
+
+.auth-page .cl-formFieldInputContainer,
+.auth-page .cl-formFieldInputWrapper,
+.auth-page .cl-inputWrapper {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  min-width: 0;
+  max-width: none !important;
+}
+
+.auth-page .cl-formFieldInput,
+.auth-page .cl-input {
+  box-sizing: border-box !important;
+  display: block !important;
+  width: 100% !important;
+  min-width: 0;
+  max-width: none !important;
+  height: 3rem !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 1rem !important;
+  background-color: #f8fafc !important;
+  padding: 0 1rem !important;
+  color: #020617 !important;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.5rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05) !important;
+  outline: none !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.auth-page .cl-formFieldInput:focus,
+.auth-page .cl-input:focus,
+.auth-page .cl-formFieldInput:focus-visible,
+.auth-page .cl-input:focus-visible {
+  border-color: #3b82f6 !important;
+  background-color: #ffffff !important;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15) !important;
+}
+
+.auth-page .cl-formFieldInput::placeholder,
+.auth-page .cl-input::placeholder {
+  color: #94a3b8;
+}
+
+.auth-page .cl-formFieldInputShowPasswordButton {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #94a3b8 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.auth-page .cl-formFieldInputShowPasswordButton:hover {
+  color: #334155 !important;
+}
+
 @media (max-width: 767px) {
   .auth-page-decoration {
     display: none;
@@ -94,6 +175,12 @@
   .auth-page *::after {
     animation: none !important;
     transition-duration: 0s !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .auth-page .cl-formFieldRow {
+    grid-template-columns: 1fr;
   }
 }
 

@@ -125,9 +125,12 @@ export type InterviewBatchEvaluationResult = {
   evaluations: InterviewBatchAnswerEvaluation[];
   summary: string;
   evaluationAvailable: boolean;
+  failureReason?: string;
+  source?: string;
 };
 
 const EMPTY_ANSWER_MARKERS = new Set(["", "(no verbal response)", "no verbal response", "(no code submitted)", "no code submitted", "no answer provided", "(no answer provided)", "transcript not available"]);
+const LOCAL_RUBRIC_FEEDBACK = "AI evaluation was unavailable, so this score was generated using local rubric analysis.";
 
 export function isEmptyInterviewAnswer(value: unknown) {
   const normalized = String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -177,6 +180,73 @@ function extractJsonArray(text: string) {
   } catch {
     return null;
   }
+}
+
+function parseAiEvaluationJson(text: string): { rawEvaluations: unknown[] | null; error?: string } {
+  const original = String(text ?? "");
+  const cleaned = original.trim().replace(/^\uFEFF/, "");
+  const fenced = Array.from(cleaned.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/gi)).map((match) => match[1].trim());
+  const candidates = [
+    cleaned,
+    ...fenced,
+    (() => {
+      const start = cleaned.indexOf("{");
+      const end = cleaned.lastIndexOf("}");
+      return start >= 0 && end > start ? cleaned.slice(start, end + 1) : "";
+    })(),
+    (() => {
+      const start = cleaned.indexOf("[");
+      const end = cleaned.lastIndexOf("]");
+      return start >= 0 && end > start ? cleaned.slice(start, end + 1) : "";
+    })(),
+  ].filter(Boolean);
+
+  let lastError = "No JSON candidate found in AI response.";
+  for (const candidate of candidates) {
+    for (const value of [candidate, candidate.replace(/,\s*([}\]])/g, "$1")]) {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) return { rawEvaluations: parsed };
+        if (parsed && typeof parsed === "object") {
+          const evaluations = (parsed as any).evaluations ?? (parsed as any).evaluation ?? (parsed as any).results;
+          if (Array.isArray(evaluations)) return { rawEvaluations: evaluations };
+          if (typeof evaluations === "string") {
+            const nested = parseAiEvaluationJson(evaluations);
+            if (nested.rawEvaluations) return nested;
+            lastError = nested.error ?? lastError;
+          }
+        }
+        lastError = "Parsed JSON did not contain an evaluations array.";
+      } catch (e: any) {
+        lastError = String(e?.message ?? e);
+      }
+    }
+  }
+
+  return { rawEvaluations: null, error: lastError };
+}
+
+function hasNumericEvaluationScore(raw: Record<string, unknown>) {
+  return [
+    raw.mainAnswerScore,
+    raw.main_answer_score,
+    raw.finalScore,
+    raw.final_score,
+    raw.score100,
+    raw.score_100,
+    raw.aiScore,
+    raw.ai_score,
+    raw.score,
+  ].some((value) => Number.isFinite(Number(value)));
+}
+
+function hasEvaluationFactors(raw: Record<string, unknown>) {
+  const value = raw.factorScores ?? raw.factor_scores ?? raw.rubricScores ?? raw.rubric_scores;
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function clampNumber(value: unknown, min: number, max: number, fallback: number) {
@@ -778,7 +848,7 @@ function logOpenRouterFailure(context: string, error: { kind: OpenRouterErrorKin
   });
 }
 
-export async function openRouterChat(prompt: string, opts?: { timeoutMs?: number; maxTokens?: number }) {
+export async function openRouterChat(prompt: string, opts?: { timeoutMs?: number; maxTokens?: number; model?: string; temperature?: number; responseFormat?: { type: "json_object" }; stop?: string[] }) {
   const apiKey = env.OPENROUTER_API_KEY;
   if (!apiKey) {
     return { ok: false as const, error: { kind: "missing_api_key" as const, message: "Missing OPENROUTER_API_KEY" } };
@@ -786,6 +856,15 @@ export async function openRouterChat(prompt: string, opts?: { timeoutMs?: number
 
   const timeoutMs = Math.max(1000, Math.floor(opts?.timeoutMs ?? 15000));
   const maxTokens = Math.max(1, Math.min(4000, Math.floor(opts?.maxTokens ?? 200)));
+  const model = opts?.model ?? "google/gemini-2.5-flash";
+  const body: Record<string, unknown> = {
+    model,
+    messages: [{ role: "user", content: prompt }],
+    max_tokens: maxTokens,
+  };
+  if (typeof opts?.temperature === "number") body.temperature = opts.temperature;
+  if (opts?.responseFormat) body.response_format = opts.responseFormat;
+  if (opts?.stop?.length) body.stop = opts.stop;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -796,11 +875,7 @@ export async function openRouterChat(prompt: string, opts?: { timeoutMs?: number
         authorization: `Bearer ${apiKey}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify({
-        model: "mistralai/mistral-small-24b-instruct-2501",
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: maxTokens,
-      }),
+      body: JSON.stringify(body),
       signal: controller.signal,
     });
 
@@ -835,6 +910,13 @@ export async function openRouterChat(prompt: string, opts?: { timeoutMs?: number
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function isEvaluationFallbackError(error: { kind: OpenRouterErrorKind; status?: number; message: string; bodySnippet?: string }) {
+  if (error.kind === "timeout" || error.kind === "empty") return true;
+  if (error.status === 429 || error.status === 408 || error.status === 502 || error.status === 503) return true;
+  const text = `${error.message}\n${error.bodySnippet ?? ""}`.toLowerCase();
+  return text.includes("provider");
 }
 
 export type FollowUpDecision = {
@@ -1315,47 +1397,43 @@ export async function generateInterviewQuestion(input: {
 function buildFallbackAnswerEvaluation(input: InterviewBatchAnswerInput): InterviewBatchAnswerEvaluation {
   const keyConcepts = normalizeConceptList(input.keyConcepts);
   const empty = isEmptyInterviewAnswer(input.userAnswer);
-  const fallbackFeedback = empty
-    ? "No answer was provided, so this question could not be evaluated."
-    : "Evaluation unavailable. Please retry evaluation.";
-  if (Number.isFinite(input.answerId)) return {
-    questionId: input.questionId,
-    answerId: input.answerId,
-    questionType: input.questionType,
-    score: 0,
-    score100: 0,
-    aiScore: 0,
-    finalScore: 0,
-    mainAnswerScore: 0,
-    followUpScore: empty ? null : input.followUpQuestion ? 0 : null,
-    rating: "Poor",
-    factorScores: zeroFactorScores(input.questionType),
-    feedback: fallbackFeedback,
-    strengths: "",
-    weaknesses: empty ? "" : keyConcepts.length ? `Missing: ${keyConcepts.join(", ")}` : "",
-    suggestions: empty
-      ? "Attempt the question by explaining the key concept, giving one example, and mentioning practical considerations."
-      : "Evaluation unavailable. Please retry evaluation.",
-    matchedConcepts: [],
-    missingConcepts: empty ? [] : keyConcepts,
-    communicationScore: 0,
-    conceptCoverage: 0,
-    technicalAccuracy: 0,
-    semanticSimilarity: 0,
-    correctnessLocked: input.questionType === "coding",
-    ...(empty ? {
+  const answer = String(input.userAnswer ?? "").trim();
+  const code = String(input.code ?? (input.questionType === "coding" ? input.userAnswer : "") ?? "").trim();
+  const explanation = String(input.explanation ?? "").trim();
+  const expectedAnswer = String(input.expectedAnswer ?? "").trim();
+
+  if (empty) {
+    return {
+      questionId: input.questionId,
+      answerId: input.answerId,
+      questionType: input.questionType,
+      score: 0,
+      score100: 0,
+      aiScore: 0,
+      finalScore: 0,
+      mainAnswerScore: 0,
+      followUpScore: input.followUpQuestion ? 0 : null,
+      rating: "Poor",
+      factorScores: zeroFactorScores(input.questionType),
+      feedback: "No answer was provided, so this question could not be evaluated.",
+      strengths: "",
+      weaknesses: "",
+      suggestions: "Attempt the question by explaining the key concept, giving one example, and mentioning practical considerations.",
+      matchedConcepts: [],
+      missingConcepts: [],
+      communicationScore: 0,
+      conceptCoverage: 0,
+      technicalAccuracy: 0,
+      semanticSimilarity: 0,
+      correctnessLocked: input.questionType === "coding",
       itemScore: 0,
       rubricScores: { relevance: 0, technicalAccuracy: 0, completeness: 0, communication: 0, structure: 0, examples: 0, fluency: 0 },
       communicationConfidence: 0,
       confidenceLevel: "low" as const,
       improvementSuggestion: "Attempt the question by explaining the key concept, giving one example, and mentioning practical considerations.",
-    } : {}),
-  };
-  /* Defensive legacy path for an invalid non-finite answer id. */
-  const answer = String(input.userAnswer ?? "").trim();
-  const code = String(input.code ?? (input.questionType === "coding" ? input.userAnswer : "") ?? "").trim();
-  const explanation = String(input.explanation ?? "").trim();
-  const expectedAnswer = String(input.expectedAnswer ?? "").trim();
+    };
+  }
+
   const normalizedAnswer = answer.replace(/\s+/g, " ").trim();
   const tooShort = normalizedAnswer.length < (input.questionType === "coding" ? 12 : 8);
   const answerForScoring = `${answer}\n${explanation}`;
@@ -1370,9 +1448,16 @@ function buildFallbackAnswerEvaluation(input: InterviewBatchAnswerInput): Interv
     : 50;
   const questionRelevance = tokenOverlapScore(input.question, answerForScoring);
   const detailScore = answerDetailScore(answerForScoring);
+  const nlp = input.nlpAnalysis;
+  const nlpScore = nlp ? clampNumber(nlp.nlpScore, 0, 100, conceptCoverage) : null;
+  const fluencyScore = nlp ? clampNumber(nlp.fluencyScore, 0, 100, 55) : null;
+  const clarityScore = nlp ? clampNumber(nlp.clarityScore, 0, 100, 55) : null;
   const communicationSource = input.questionType === "coding" ? explanation || answer : answer;
   const communicationScore = clampNumber(
-    tooShort ? 35 : communicationSource.length > 400 ? 85 : communicationSource.length > 180 ? 75 : communicationSource.length > 80 ? 65 : 55,
+    Math.min(
+      82,
+      clarityScore ?? fluencyScore ?? (tooShort ? 35 : communicationSource.length > 400 ? 85 : communicationSource.length > 180 ? 75 : communicationSource.length > 80 ? 65 : 55)
+    ),
     0,
     100,
     55
@@ -1380,16 +1465,14 @@ function buildFallbackAnswerEvaluation(input: InterviewBatchAnswerInput): Interv
   const baselineMeaning = clampNumber(
     Math.max(
       semanticSimilarity * 0.45 + conceptCoverage * 0.55,
-      questionRelevance * 0.35 + semanticSimilarity * 0.35 + conceptCoverage * 0.3
+      questionRelevance * 0.3 + semanticSimilarity * 0.25 + conceptCoverage * 0.25 + (nlpScore ?? detailScore) * 0.2
     ),
     0,
     100,
     50
   );
   let technicalAccuracy = tooShort ? Math.min(60, baselineMeaning) : baselineMeaning;
-  let feedback = tooShort
-    ? "Answer is brief; scoring reflects relevance and correctness signals that could be inferred, but more detail would improve confidence."
-    : "Evaluation was generated with a deterministic rubric fallback because AI batch evaluation was unavailable or incomplete.";
+  let feedback = LOCAL_RUBRIC_FEEDBACK;
   let factorScores: RubricFactorScores;
 
   if (input.questionType === "coding") {
@@ -1431,12 +1514,12 @@ function buildFallbackAnswerEvaluation(input: InterviewBatchAnswerInput): Interv
       explanationCommunication: explanationScore,
     };
     feedback = hiddenExecutionScore !== null
-      ? `Backend hidden test execution result: ${input.hiddenTestExecutionResult ?? `correctness ${hiddenExecutionScore}/100`}. Fallback scoring used hidden tests for correctness and also considered code structure and explanation clarity.`
+      ? `${LOCAL_RUBRIC_FEEDBACK} Backend hidden test execution result: ${input.hiddenTestExecutionResult ?? `correctness ${hiddenExecutionScore}/100`}.`
       : testRun
       ? testRun.ok
-        ? `Code execution passed ${testRun.passed}/${testRun.total} test cases. Fallback scoring also considered code structure and explanation clarity.`
-        : `Code execution failed: ${testRun.error}`
-      : "Correctness is estimated from the submitted approach because automated test execution is not enabled. Rubric scoring considered logic, approach, syntax quality, edge case awareness, and explanation quality.";
+        ? `${LOCAL_RUBRIC_FEEDBACK} Code execution passed ${testRun.passed}/${testRun.total} visible test cases.`
+        : `${LOCAL_RUBRIC_FEEDBACK} Code execution failed: ${testRun.error}`
+      : `${LOCAL_RUBRIC_FEEDBACK} Correctness is estimated from code presence, basic structure, explanation, and concept signals.`;
   } else {
     const relevance = clampNumber(Math.max(baselineMeaning, questionRelevance * 0.45 + semanticSimilarity * 0.3 + conceptCoverage * 0.25), 0, 100, baselineMeaning);
     technicalAccuracy = clampNumber(Math.max(technicalAccuracy, relevance >= 70 ? 65 : technicalAccuracy), 0, 100, technicalAccuracy);
@@ -1461,17 +1544,17 @@ function buildFallbackAnswerEvaluation(input: InterviewBatchAnswerInput): Interv
     };
   }
 
-  const score100 = input.questionType === "coding"
+  const rawScore100 = input.questionType === "coding"
     ? calculateCodingScore(factorScores as CodingFactorScores)
     : calculateTheoryScore(factorScores as TheoryFactorScores);
-  const finalScore = score100;
-  const score = clampNumber(Math.round(score100 / 10), 0, 10, 0);
-  const rating = getRating(score100);
+  const localScoreCap = input.questionType === "coding" && input.hiddenCorrectnessScore !== null && input.hiddenCorrectnessScore !== undefined ? 88 : 78;
+  const score100 = Math.min(rawScore100, localScoreCap);
   const followUpText = String(input.followUpAnswer ?? "").trim();
   const followUpScore = input.followUpQuestion
     ? clampNumber(followUpText.length < 8 ? 20 : followUpText.length < 50 ? 55 : followUpText.length < 140 ? 70 : 80, 0, 100, 0)
     : null;
-  const combinedScore = followUpScore === null ? score100 : Math.round(score100 * 0.7 + followUpScore * 0.3);
+  const combinedScore = Math.min(followUpScore === null ? score100 : Math.round(score100 * 0.7 + followUpScore * 0.3), localScoreCap);
+  const score = clampNumber(Math.round(combinedScore / 10), 0, 10, 0);
 
   return {
     questionId: input.questionId,
@@ -1532,9 +1615,10 @@ function coerceBatchAnswerEvaluation(
   const matchedConcepts = rawMatchedConcepts.map((concept) => allowedByKey.get(concept.toLowerCase())).filter((concept): concept is string => Boolean(concept));
   const missingConcepts = rawMissingConcepts.map((concept) => allowedByKey.get(concept.toLowerCase())).filter((concept): concept is string => Boolean(concept));
   const questionType = fallback.questionType;
+  const rawFactorScores = raw.factorScores ?? raw.factor_scores ?? raw.rubricScores ?? raw.rubric_scores;
   const factorScores = questionType === "coding"
-    ? normalizeCodingFactorScores(raw.factorScores ?? raw.factor_scores, fallback.factorScores as CodingFactorScores)
-    : normalizeTheoryFactorScores(raw.factorScores ?? raw.factor_scores, fallback.factorScores as TheoryFactorScores);
+    ? normalizeCodingFactorScores(rawFactorScores, fallback.factorScores as CodingFactorScores)
+    : normalizeTheoryFactorScores(rawFactorScores, fallback.factorScores as TheoryFactorScores);
   if (questionType === "coding" && fallback.correctnessLocked) {
     (factorScores as CodingFactorScores).correctness = (fallback.factorScores as CodingFactorScores).correctness;
   } else if (
@@ -1548,8 +1632,12 @@ function coerceBatchAnswerEvaluation(
   const factorScore100 = questionType === "coding"
     ? calculateCodingScore(factorScores as CodingFactorScores)
     : calculateTheoryScore(factorScores as TheoryFactorScores);
-  const aiScore = clampNumber(raw.aiScore ?? raw.ai_score, 0, 100, factorScore100);
-  const mainAnswerScore = clampNumber(raw.mainAnswerScore ?? raw.main_answer_score, 0, 100, aiScore);
+  const explicitScore = raw.mainAnswerScore ?? raw.main_answer_score ?? raw.finalScore ?? raw.final_score ?? raw.score100 ?? raw.score_100 ?? raw.aiScore ?? raw.ai_score ?? raw.score;
+  const normalizedExplicitScore = raw.score === explicitScore && Number(explicitScore) <= 10
+    ? Number(explicitScore) * 10
+    : explicitScore;
+  const aiScore = clampNumber(raw.aiScore ?? raw.ai_score ?? normalizedExplicitScore, 0, 100, factorScore100);
+  const mainAnswerScore = clampNumber(raw.mainAnswerScore ?? raw.main_answer_score ?? normalizedExplicitScore, 0, 100, aiScore);
   const followUpScore = fallback.followUpScore === null || raw.followUpScore === null || raw.follow_up_score === null
     ? null
     : clampNumber(raw.followUpScore ?? raw.follow_up_score, 0, 100, fallback.followUpScore ?? 0);
@@ -1646,12 +1734,48 @@ function describeCodingTestExecution(input: InterviewBatchAnswerInput) {
   return `passed ${run.passed}/${run.total} test cases`;
 }
 
+async function repairEvaluationJsonWithGemini(params: {
+  previousResponse: string;
+  expectedCount: number;
+  interviewId?: number | null;
+}) {
+  const repairPrompt = [
+    "Convert the previous response into valid JSON only. Do not add or remove evaluation items.",
+    "Do not include markdown.",
+    "Do not include explanations outside JSON.",
+    "Do not include extra text in any language.",
+    "Do not include trailing comments.",
+    "Return exactly one JSON object with an evaluations array.",
+    `The evaluations array must contain exactly ${params.expectedCount} item(s).`,
+    "Previous response:",
+    clip(params.previousResponse, 12000),
+  ].join("\n");
+
+  const repaired = await openRouterChat(repairPrompt, {
+    timeoutMs: 30000,
+    maxTokens: 4000,
+    model: "google/gemini-2.5-flash",
+    temperature: 0,
+    responseFormat: { type: "json_object" },
+  });
+  if (!repaired.ok) {
+    logOpenRouterFailure("evaluateInterviewBatch Gemini JSON repair", repaired.error);
+    return null;
+  }
+  console.info("[interview-evaluation] Gemini repair response", {
+    interviewId: params.interviewId ?? null,
+    responseSnippet: clip(repaired.text, 4000),
+  });
+  return repaired.text;
+}
+
 export async function evaluateInterviewBatch(input: {
   role: string;
   experience: string;
   techStack: unknown;
   answers: InterviewBatchAnswerInput[];
   personality?: InterviewerPersonality;
+  interviewId?: number;
 }): Promise<InterviewBatchEvaluationResult> {
   const fallbacks = new Map<number, InterviewBatchAnswerEvaluation>();
   for (const answer of input.answers) {
@@ -1670,6 +1794,7 @@ export async function evaluateInterviewBatch(input: {
 
   const prompt = [
     "You are a senior technical interviewer.",
+    "You are also a strict JSON generator for a backend parser.",
     "Evaluate consistently using the question, rubric, transcript/user answer, NLP metrics, and test execution evidence.",
     "Evaluate every answer only against its own exact question, expected answer, and expected concepts.",
     "Never reuse feedback, missing concepts, or improvement suggestions across questions. Make each suggestion specific and useful for that question.",
@@ -1726,8 +1851,14 @@ export async function evaluateInterviewBatch(input: {
     "User answer: Supervised uses labeled data. Unsupervised uses unlabeled data.",
     "Expected evaluation: relevance high; technicalAccuracy high; completeness medium because examples are missing; examplesPracticalKnowledge low.",
     "For that calibration, finalScore should usually be around 65-75.",
-    "Return STRICT JSON only. No markdown, no prose, no extra keys.",
-    "Use exactly this shape:",
+    "Return ONLY valid JSON.",
+    "Do not include markdown.",
+    "Do not include explanations outside JSON.",
+    "Do not include extra text in any language.",
+    "Do not include trailing comments.",
+    "Do not include text before, between, or after JSON array items.",
+    "Return exactly one JSON object with an evaluations array.",
+    "Use exactly this JSON object shape:",
     `{"evaluations":[{"answerId":0,"factorScores":{"relevance":0,"technicalAccuracy":0,"completeness":0,"communicationClarity":0,"structureOrganization":0,"examplesPracticalKnowledge":0,"confidenceFluency":0},"mainAnswerScore":0,"followUpScore":null,"technicalFeedback":"","communicationFeedback":"","missingConcepts":[],"improvementSuggestion":"","matchedConcepts":[]}]}`,
     "Score the main answer and follow-up answer separately. If a follow-up exists, final scoring is computed by the backend as 70% mainAnswerScore + 30% followUpScore.",
     `For coding evaluations, factorScores must be {"correctness":0,"logicProblemSolving":0,"timeComplexity":0,"spaceComplexity":0,"codeQuality":0,"edgeCaseHandling":0,"explanationCommunication":0}.`,
@@ -1774,44 +1905,157 @@ export async function evaluateInterviewBatch(input: {
       .join("\n\n")}`,
   ].join("\n");
 
-  const response = await openRouterChat(prompt, { timeoutMs: 60000, maxTokens: 4000 });
-  if (!response.ok) {
-    logOpenRouterFailure("evaluateInterviewBatch", response.error);
-    const evaluations = Array.from(fallbacks.values());
-    return { evaluations, summary: buildBatchSummary(evaluations), evaluationAvailable: false };
+  const evaluationModels = [
+    { model: "google/gemini-2.5-flash", waitBeforeMs: 0 },
+    { model: "mistralai/mistral-small-24b-instruct-2501", waitBeforeMs: 2000 },
+    { model: "meta-llama/llama-3.3-70b-instruct:free", waitBeforeMs: 5000 },
+  ];
+  let failureReason = "Evaluation attempts exhausted.";
+
+  for (const [modelIndex, config] of evaluationModels.entries()) {
+    if (config.waitBeforeMs > 0) await wait(config.waitBeforeMs);
+
+    const response = await openRouterChat(prompt, {
+      timeoutMs: 60000,
+      maxTokens: 4000,
+      model: config.model,
+      ...(config.model === "google/gemini-2.5-flash"
+        ? { temperature: 0, responseFormat: { type: "json_object" as const } }
+        : {}),
+    });
+    if (!response.ok) {
+      logOpenRouterFailure(`evaluateInterviewBatch model ${config.model}`, response.error);
+      failureReason = response.error.message;
+      console.warn("[interview-evaluation] model failed", {
+        interviewId: input.interviewId ?? null,
+        model: config.model,
+        reason: failureReason,
+      });
+      if (modelIndex === 0 && !isEvaluationFallbackError(response.error)) break;
+      if (modelIndex < evaluationModels.length - 1) continue;
+      break;
+    }
+
+    console.info("[interview-evaluation] raw AI response", {
+      interviewId: input.interviewId ?? null,
+      answerCount: input.answers.length,
+      model: config.model,
+      responseSnippet: clip(response.text, 4000),
+    });
+
+    let responseText = response.text;
+    let parsed = parseAiEvaluationJson(responseText);
+    if (!Array.isArray(parsed.rawEvaluations) && config.model === "google/gemini-2.5-flash") {
+      const repairedText = await repairEvaluationJsonWithGemini({
+        previousResponse: response.text,
+        expectedCount: evaluableAnswers.length,
+        interviewId: input.interviewId ?? null,
+      });
+      if (repairedText) {
+        responseText = repairedText;
+        parsed = parseAiEvaluationJson(responseText);
+      }
+    }
+    const rawEvaluations = parsed.rawEvaluations;
+    if (!Array.isArray(rawEvaluations)) {
+      failureReason = parsed.error ?? "AI response did not contain valid evaluation JSON.";
+      console.error("[interview-evaluation] JSON parse error", {
+        interviewId: input.interviewId ?? null,
+        model: config.model,
+        error: failureReason,
+        responseSnippet: clip(responseText, 4000),
+      });
+      console.warn("[interview-evaluation] model failed", {
+        interviewId: input.interviewId ?? null,
+        model: config.model,
+        reason: failureReason,
+      });
+      continue;
+    }
+
+    const rawByAnswerId = new Map<number, Record<string, unknown>>();
+    const rawByIndex: Array<Record<string, unknown> | undefined> = [];
+    const validationErrors: string[] = [];
+    for (const [index, raw] of rawEvaluations.entries()) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        validationErrors.push(`Evaluation item ${index + 1} is not an object.`);
+        continue;
+      }
+      const record = raw as Record<string, unknown>;
+      if (!hasNumericEvaluationScore(record)) validationErrors.push(`Evaluation item ${index + 1} is missing a numeric score.`);
+      if (!hasEvaluationFactors(record)) validationErrors.push(`Evaluation item ${index + 1} is missing factorScores.`);
+      if (!hasNumericEvaluationScore(record) || !hasEvaluationFactors(record)) continue;
+      rawByIndex[index] = record;
+      const answerId = Number((raw as any).answerId ?? (raw as any).answer_id);
+      if (!Number.isFinite(answerId)) continue;
+      rawByAnswerId.set(answerId, record);
+    }
+
+    if (validationErrors.length) {
+      failureReason = validationErrors[0];
+      console.error("[interview-evaluation] validation error", {
+        interviewId: input.interviewId ?? null,
+        model: config.model,
+        errors: validationErrors.slice(0, 10),
+        receivedCount: rawEvaluations.length,
+      });
+      console.warn("[interview-evaluation] model failed", {
+        interviewId: input.interviewId ?? null,
+        model: config.model,
+        reason: failureReason,
+      });
+      continue;
+    }
+
+    const evaluations = input.answers.flatMap((answer) => {
+      const fallback = fallbacks.get(answer.answerId) ?? buildFallbackAnswerEvaluation(answer);
+      if (isEmptyInterviewAnswer(answer.userAnswer)) return [fallback];
+      const raw = rawByAnswerId.get(answer.answerId) ?? rawByIndex[evaluableIndexByAnswerId.get(answer.answerId) ?? -1];
+      return raw ? [coerceBatchAnswerEvaluation(raw, fallback)] : [];
+    });
+    const summary = buildBatchSummary(evaluations);
+
+    const evaluationAvailable = evaluableAnswers.every((answer) => rawByAnswerId.has(answer.answerId) || rawByIndex[evaluableIndexByAnswerId.get(answer.answerId) ?? -1]);
+    if (!evaluationAvailable) {
+      const message = "AI response omitted one or more answer evaluations.";
+      failureReason = message;
+      console.error("[interview-evaluation] validation error", {
+        interviewId: input.interviewId ?? null,
+        model: config.model,
+        error: message,
+        expectedAnswerIds: evaluableAnswers.map((answer) => answer.answerId),
+        receivedAnswerIds: Array.from(rawByAnswerId.keys()),
+        receivedCount: rawEvaluations.length,
+      });
+      console.warn("[interview-evaluation] model failed", {
+        interviewId: input.interviewId ?? null,
+        model: config.model,
+        reason: failureReason,
+      });
+      continue;
+    }
+    console.info("[interview-evaluation] model succeeded", {
+      interviewId: input.interviewId ?? null,
+      model: config.model,
+      source: modelIndex === 0 ? "Gemini" : "fallback AI model",
+      answerCount: evaluations.length,
+    });
+    return { evaluations, summary, evaluationAvailable, source: modelIndex === 0 ? "Gemini" : "fallback AI model" };
   }
 
-  const obj = extractJsonObject(response.text);
-  const rawEvaluations = obj && typeof obj === "object" && Array.isArray((obj as any).evaluations)
-    ? (obj as any).evaluations
-    : extractJsonArray(response.text);
-  if (!Array.isArray(rawEvaluations)) {
-    console.error("[openrouter] evaluateInterviewBatch returned invalid JSON", { responseSnippet: clip(response.text, 2000) });
-    const evaluations = Array.from(fallbacks.values());
-    return { evaluations, summary: buildBatchSummary(evaluations), evaluationAvailable: false };
-  }
-
-  const rawByAnswerId = new Map<number, Record<string, unknown>>();
-  const rawByIndex: Array<Record<string, unknown> | undefined> = [];
-  for (const [index, raw] of rawEvaluations.entries()) {
-    if (!raw || typeof raw !== "object") continue;
-    rawByIndex[index] = raw as Record<string, unknown>;
-    const answerId = Number((raw as any).answerId ?? (raw as any).answer_id);
-    if (!Number.isFinite(answerId)) continue;
-    rawByAnswerId.set(answerId, raw as Record<string, unknown>);
-  }
-
-  const evaluations = input.answers.map((answer) => {
-    const fallback = fallbacks.get(answer.answerId) ?? buildFallbackAnswerEvaluation(answer);
-    if (isEmptyInterviewAnswer(answer.userAnswer)) return fallback;
-    const raw = rawByAnswerId.get(answer.answerId) ?? rawByIndex[evaluableIndexByAnswerId.get(answer.answerId) ?? -1];
-    return raw ? coerceBatchAnswerEvaluation(raw, fallback) : fallback;
+  const localEvaluations = input.answers.map((answer) => fallbacks.get(answer.answerId) ?? buildFallbackAnswerEvaluation(answer));
+  console.warn("[interview-evaluation] local rubric fallback used", {
+    interviewId: input.interviewId ?? null,
+    reason: failureReason,
+    answerCount: localEvaluations.length,
   });
-  const summary = buildBatchSummary(evaluations);
-
-  const evaluationAvailable = evaluableAnswers.every((answer) => rawByAnswerId.has(answer.answerId) || rawByIndex[evaluableIndexByAnswerId.get(answer.answerId) ?? -1]);
-  if (!evaluationAvailable) console.error("[openrouter] evaluateInterviewBatch response omitted one or more answers", { expectedAnswerIds: evaluableAnswers.map((answer) => answer.answerId), receivedAnswerIds: Array.from(rawByAnswerId.keys()) });
-  return { evaluations, summary, evaluationAvailable };
+  return {
+    evaluations: localEvaluations,
+    summary: buildBatchSummary(localEvaluations),
+    evaluationAvailable: true,
+    failureReason,
+    source: "local rubric fallback",
+  };
 }
 
 export async function evaluateInterviewAnswer(input: {

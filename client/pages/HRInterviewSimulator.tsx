@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { api, ApiError } from '../services/api';
@@ -39,6 +39,7 @@ type NetworkState = {
 };
 
 const QUESTION_SECONDS = 180;
+const AUTO_PAUSE_SILENCE_TIMEOUT_MS = 6000;
 const GREETING =
   "Hi, I'm Priya Sharma, your HR interviewer for today. I'll be asking you a few questions about your communication, teamwork, confidence, and career goals. Please answer naturally, just like you would in a real interview. Let's get started.";
 
@@ -56,9 +57,9 @@ const preferredVoiceNames = [
 
 const transitions = [
   "Let's start with a simple introduction.",
-  'Thank you. Now I would like to understand your work style.',
-  "That's helpful. Let us move to a teamwork question.",
-  'Thank you for sharing that. Let us continue.',
+  'Now I would like to understand your work style.',
+  'Let us move to a teamwork question.',
+  'Let us continue with another HR scenario.',
   'Now I would like to understand how you handle challenges.',
   'Let us talk about adaptability.',
   'Next, I want to understand your leadership and culture fit.',
@@ -66,10 +67,12 @@ const transitions = [
 ];
 
 const afterSaveTransitions = [
-  'Thank you for sharing that.',
-  "That's helpful.",
-  "I understand. Let's move to the next question.",
+  'Let us continue.',
+  'We will move to the next one.',
+  'Here is the next question.',
 ];
+
+const emptyAnswerTransition = "I didn't catch your answer. You can try again or continue.";
 
 const getSpeechRecognition = () => {
   const w = window as any;
@@ -146,11 +149,15 @@ const HRInterviewSimulator: React.FC = () => {
   const [noiseWarning, setNoiseWarning] = useState('');
   const [network, setNetwork] = useState<NetworkState>(() => getNetworkState());
   const [silenceAttempts, setSilenceAttempts] = useState(0);
+  const [answerCaptureState, setAnswerCaptureState] = useState<'idle' | 'listening' | 'paused'>('idle');
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const answerRecorderRef = useRef<MediaRecorder | null>(null);
+  const answerAudioChunksRef = useRef<Blob[]>([]);
   const recognitionRef = useRef<any>(null);
   const initializedRef = useRef(false);
   const conversationStateRef = useRef<ConversationState>('PREPARING');
+  const answerCaptureStateRef = useRef<'idle' | 'listening' | 'paused'>('idle');
   const mainAnswerRef = useRef('');
   const followUpAnswerRef = useRef('');
   const finalTranscriptRef = useRef('');
@@ -159,17 +166,20 @@ const HRInterviewSimulator: React.FC = () => {
   const activeTargetRef = useRef<'main' | 'followup'>('main');
   const savingRef = useRef(false);
   const submittedRef = useRef<Set<string>>(new Set());
+  const emptyAnswerPromptedRef = useRef(false);
   const silenceTimerRef = useRef<number | null>(null);
   const noSpeechTimerRef = useRef<number | null>(null);
+  const recognitionActiveRef = useRef(false);
+  const intentionalRecognitionStopRef = useRef(false);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserFrameRef = useRef<number | null>(null);
   const highNoiseMsRef = useRef(0);
   const lastSoundAtRef = useRef(Date.now());
 
   const question = interview?.questions[currentIndex] ?? null;
-  const supportsRecognition = useMemo(() => typeof window !== 'undefined' && Boolean(getSpeechRecognition()), []);
   const completedCount = submittedIds.size;
-  const fullAnswer = (manualAnswer || currentTranscript || interimTranscript).trim();
+  const liveMainTranscript = `${currentTranscript} ${interimTranscript}`.trim();
+  const fullAnswer = (manualAnswer || liveMainTranscript).trim();
 
   const clearTimers = useCallback(() => {
     if (silenceTimerRef.current) window.clearTimeout(silenceTimerRef.current);
@@ -181,9 +191,16 @@ const HRInterviewSimulator: React.FC = () => {
   const cleanupAudio = useCallback(() => {
     window.speechSynthesis?.cancel();
     try {
+      intentionalRecognitionStopRef.current = true;
+      recognitionActiveRef.current = false;
       recognitionRef.current?.stop?.();
     } catch {}
+    try {
+      if (answerRecorderRef.current && answerRecorderRef.current.state !== 'inactive') answerRecorderRef.current.stop();
+    } catch {}
     recognitionRef.current = null;
+    answerRecorderRef.current = null;
+    setAnswerCaptureState('idle');
     clearTimers();
   }, [clearTimers]);
 
@@ -210,6 +227,9 @@ const HRInterviewSimulator: React.FC = () => {
     setNoiseWarning('');
     setFallbackOpen(false);
     setIsManualMode(false);
+    setAnswerCaptureState('idle');
+    answerAudioChunksRef.current = [];
+    emptyAnswerPromptedRef.current = false;
     setSecondsLeft(QUESTION_SECONDS);
   }, [cleanupAudio]);
 
@@ -227,75 +247,154 @@ const HRInterviewSimulator: React.FC = () => {
     return fallback;
   }, []);
 
+  const pauseAnswerCapture = useCallback((nextState: 'idle' | 'paused' = 'paused') => {
+    intentionalRecognitionStopRef.current = true;
+    recognitionActiveRef.current = false;
+    if (silenceTimerRef.current) window.clearTimeout(silenceTimerRef.current);
+    if (noSpeechTimerRef.current) window.clearTimeout(noSpeechTimerRef.current);
+    silenceTimerRef.current = null;
+    noSpeechTimerRef.current = null;
+    try {
+      recognitionRef.current?.stop?.();
+    } catch {}
+    try {
+      if (nextState === 'idle' && answerRecorderRef.current && answerRecorderRef.current.state !== 'inactive') {
+        answerRecorderRef.current.stop();
+        answerRecorderRef.current = null;
+      } else if (answerRecorderRef.current?.state === 'recording') {
+        answerRecorderRef.current.pause();
+      }
+    } catch {}
+    setAnswerCaptureState(nextState);
+    setConversationState('USER_LISTENING');
+  }, []);
+
+  const scheduleSilenceAutoPause = useCallback(() => {
+    if (silenceTimerRef.current) window.clearTimeout(silenceTimerRef.current);
+
+    // HR answers often include natural thinking pauses. Silence never submits
+    // an answer; after a longer continuous quiet window, capture is only paused
+    // so the user can resume, clear, or continue intentionally.
+    silenceTimerRef.current = window.setTimeout(() => {
+      const silentForMs = Date.now() - lastSoundAtRef.current;
+
+      if (silentForMs < AUTO_PAUSE_SILENCE_TIMEOUT_MS) {
+        scheduleSilenceAutoPause();
+        return;
+      }
+
+      if (!savingRef.current && recognitionActiveRef.current) pauseAnswerCapture('paused');
+    }, AUTO_PAUSE_SILENCE_TIMEOUT_MS);
+  }, [pauseAnswerCapture]);
+
   const startListening = useCallback((target: 'main' | 'followup' = 'main') => {
     activeTargetRef.current = target;
     setConversationState('USER_LISTENING');
-    if (!micEnabled || micBlocked || !supportsRecognition) {
+    setMediaError('');
+    if (!micEnabled || micBlocked) {
       setFallbackOpen(true);
       return;
     }
 
     const Recognition = getSpeechRecognition();
+    const audioTrack = streamRef.current?.getAudioTracks()[0];
+
+    try {
+      if (!answerRecorderRef.current && audioTrack && typeof MediaRecorder !== 'undefined') {
+        const recorder = new MediaRecorder(new MediaStream([audioTrack]));
+        recorder.ondataavailable = (event) => {
+          if (event.data?.size) answerAudioChunksRef.current.push(event.data);
+        };
+        recorder.start();
+        answerRecorderRef.current = recorder;
+      } else if (answerRecorderRef.current?.state === 'paused') {
+        answerRecorderRef.current.resume();
+      }
+    } catch {
+      setFallbackOpen(true);
+    }
+
     if (!Recognition) {
       setFallbackOpen(true);
+      setIsManualMode(true);
+      setMediaError('Speech recognition is unavailable in this browser. You can type your answer.');
+      recognitionActiveRef.current = true;
+      setAnswerCaptureState('listening');
+      scheduleSilenceAutoPause();
       return;
     }
 
     try {
-      if (target === 'main') mainAnswerRef.current = '';
-      else followUpAnswerRef.current = '';
-      finalTranscriptRef.current = '';
-      interimTranscriptRef.current = '';
+      intentionalRecognitionStopRef.current = true;
       recognitionRef.current?.stop?.();
+    } catch {}
+
+    try {
       const recognition = new Recognition();
       recognition.lang = 'en-US';
       recognition.continuous = true;
       recognition.interimResults = true;
+      recognition.onaudiostart = () => {
+        recognitionActiveRef.current = true;
+      };
+      recognition.onspeechstart = () => {
+        lastSoundAtRef.current = Date.now();
+        if (silenceTimerRef.current) window.clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      };
+      recognition.onspeechend = () => {
+        scheduleSilenceAutoPause();
+      };
       recognition.onresult = (event: any) => {
         clearTimers();
+        lastSoundAtRef.current = Date.now();
         let interim = '';
         for (let i = event.resultIndex; i < event.results.length; i += 1) {
-          const transcript = String(event.results[i][0].transcript || '');
-          if (event.results[i].isFinal) finalTranscriptRef.current = `${finalTranscriptRef.current} ${transcript}`.trim();
-          else interim += transcript;
+          const transcript = String(event.results[i][0].transcript || '').trim();
+          if (!transcript) continue;
+          if (event.results[i].isFinal) {
+            if (target === 'main') mainAnswerRef.current = `${mainAnswerRef.current} ${transcript}`.trim();
+            else followUpAnswerRef.current = `${followUpAnswerRef.current} ${transcript}`.trim();
+          } else {
+            interim += ` ${transcript}`;
+          }
         }
         interimTranscriptRef.current = interim.trim();
-        const finalValue = finalTranscriptRef.current.trim();
-        const shownValue = `${finalValue} ${interimTranscriptRef.current}`.trim();
+        const baseValue = target === 'main' ? mainAnswerRef.current.trim() : followUpAnswerRef.current.trim();
+        const shownValue = `${baseValue} ${interimTranscriptRef.current}`.trim();
         if (target === 'main') {
-          mainAnswerRef.current = shownValue;
-          setCurrentTranscript(finalValue);
+          setCurrentTranscript(baseValue);
           setInterimTranscript(interimTranscriptRef.current);
         } else {
-          followUpAnswerRef.current = shownValue;
           setFollowUpAnswer(shownValue);
         }
         setConversationState(meaningfulWordCount(shownValue) > 0 ? 'USER_SPEAKING' : 'USER_LISTENING');
-        silenceTimerRef.current = window.setTimeout(() => {
-          const answer = target === 'main' ? mainAnswerRef.current.trim() : followUpAnswerRef.current.trim();
-          if (!isMeaninglessClientAnswer(answer)) {
-            if (target === 'main') submitMainAnswer(answer);
-            else saveAnswer(answer);
-          }
-        }, 2500);
+        scheduleSilenceAutoPause();
       };
-      recognition.onerror = () => {
+      recognition.onerror = (event: any) => {
+        recognitionActiveRef.current = false;
         setFallbackOpen(true);
-        setMediaError('Speech recognition is unavailable. Please type your answer.');
-      };
-      recognition.onend = () => {
-        if (!savingRef.current && activeTargetRef.current === target && !submittedRef.current.has(currentQuestionIdRef.current) && micEnabled && !micBlocked) {
-          try { recognition.start(); } catch {}
+        setIsManualMode(true);
+        if (event?.error === 'not-allowed' || event?.error === 'service-not-allowed') {
+          setMediaError('Speech transcript permission was blocked. You can type your answer.');
         }
       };
+      recognition.onend = () => {
+        recognitionActiveRef.current = false;
+      };
+      intentionalRecognitionStopRef.current = false;
       recognition.start();
+      recognitionActiveRef.current = true;
       recognitionRef.current = recognition;
-      noSpeechTimerRef.current = window.setTimeout(() => handleNoSpeech(), 6000);
+      setAnswerCaptureState('listening');
+      scheduleSilenceAutoPause();
     } catch {
+      recognitionActiveRef.current = Boolean(audioTrack);
       setFallbackOpen(true);
-      setMediaError('Speech recognition is unavailable. Please type your answer.');
+      setIsManualMode(true);
+      setAnswerCaptureState(audioTrack ? 'listening' : 'idle');
     }
-  }, [clearTimers, micBlocked, micEnabled, supportsRecognition]);
+  }, [clearTimers, micBlocked, micEnabled, scheduleSilenceAutoPause]);
 
   const speak = useCallback((text: string, state: ConversationState, onEnd?: () => void) => {
     cleanupAudio();
@@ -315,14 +414,23 @@ const HRInterviewSimulator: React.FC = () => {
     const q = interview?.questions[index];
     if (!q) return;
     const transition = transitions[Math.min(index, transitions.length - 1)];
-    speak(`${transition} ${q.question}`, 'AI_SPEAKING', () => startListening('main'));
-  }, [interview, speak, startListening]);
+    speak(`${transition} ${q.question}`, 'AI_SPEAKING', () => setConversationState('USER_LISTENING'));
+  }, [interview, speak]);
+
+  const shouldConsiderFollowUp = useCallback((answer: string) => {
+    const words = meaningfulWordCount(answer);
+    if (followUpsAsked >= 3 || words < 8) return false;
+    const hasExample = /\b(example|project|situation|when|once|during|in my|at my|college|internship|work)\b/i.test(answer);
+    const hasOutcome = /\b(result|outcome|impact|learned|improved|resolved|achieved|completed|success)\b/i.test(answer);
+    const hasOwnership = /\b(i|my|me|we)\b/i.test(answer);
+    return words < 45 || !hasExample || !hasOutcome || !hasOwnership;
+  }, [followUpsAsked]);
 
   const goToNextQuestion = useCallback(() => {
     if (!interview) return;
     if (currentIndex >= interview.questions.length - 1) {
       setConversationState('COMPLETED');
-      speak("Thank you. That concludes your HR interview. I'm preparing your report now.", 'AI_SPEAKING', () => {
+      speak("That concludes your HR interview. I'm preparing your report now.", 'AI_SPEAKING', () => {
         cleanupAudio();
         stopMedia();
         navigate(`/hr-interview/result/${interview.id}`);
@@ -335,14 +443,16 @@ const HRInterviewSimulator: React.FC = () => {
     window.setTimeout(() => askQuestion(nextIndex), 350);
   }, [askQuestion, cleanupAudio, currentIndex, interview, navigate, speak, stopMedia]);
 
-  async function saveAnswer(overrideFollowUpAnswer?: string) {
+  async function saveAnswer(overrideFollowUpAnswer?: string, submitMode: 'manual' | 'timer' = 'manual') {
     if (!interview || !question || savingRef.current || submittedRef.current.has(question.questionId)) return;
+    const answerText = (manualAnswer || mainAnswerRef.current || currentTranscript || finalTranscriptRef.current || interimTranscriptRef.current).trim();
+
     savingRef.current = true;
     setSaving(true);
+    pauseAnswerCapture('idle');
     setConversationState('PROCESSING');
-    cleanupAudio();
+    window.speechSynthesis?.cancel();
     try {
-      const answerText = (manualAnswer || mainAnswerRef.current || currentTranscript || finalTranscriptRef.current || interimTranscriptRef.current).trim();
       await api.post('/hr-interview/answer', {
         interviewId: interview.id,
         questionId: question.questionId,
@@ -353,7 +463,9 @@ const HRInterviewSimulator: React.FC = () => {
       });
       submittedRef.current = new Set(submittedRef.current).add(question.questionId);
       setSubmittedIds(new Set(submittedRef.current));
-      const transition = afterSaveTransitions[currentIndex % afterSaveTransitions.length];
+      const transition = isMeaninglessClientAnswer(answerText)
+        ? "We'll continue to the next question."
+        : afterSaveTransitions[currentIndex % afterSaveTransitions.length];
       speak(transition, 'AI_SPEAKING', goToNextQuestion);
     } catch (err: any) {
       if (err instanceof ApiError && err.status === 401) logout();
@@ -366,14 +478,24 @@ const HRInterviewSimulator: React.FC = () => {
     }
   }
 
-  async function submitMainAnswer(answerOverride?: string) {
+  async function submitMainAnswer(answerOverride?: string, submitMode: 'manual' | 'timer' = 'manual') {
     if (!interview || !question || savingRef.current || submittedRef.current.has(question.questionId)) return;
     const answer = (answerOverride || manualAnswer || mainAnswerRef.current || currentTranscript || finalTranscriptRef.current || interimTranscriptRef.current).trim();
     mainAnswerRef.current = answer;
-    cleanupAudio();
+    pauseAnswerCapture('idle');
+    window.speechSynthesis?.cancel();
+    if (isMeaninglessClientAnswer(answer)) {
+      if (submitMode === 'manual' && !emptyAnswerPromptedRef.current) {
+        emptyAnswerPromptedRef.current = true;
+        speak(emptyAnswerTransition, 'AI_SPEAKING', () => setConversationState('USER_LISTENING'));
+        return;
+      }
+      await saveAnswer(undefined, submitMode);
+      return;
+    }
     setConversationState('PROCESSING');
-    if (isMeaninglessClientAnswer(answer) || followUpsAsked >= 2) {
-      await saveAnswer();
+    if (!shouldConsiderFollowUp(answer)) {
+      await saveAnswer(undefined, submitMode);
       return;
     }
     try {
@@ -386,30 +508,22 @@ const HRInterviewSimulator: React.FC = () => {
       if (follow?.followUpQuestion) {
         setFollowUpQuestion(follow.followUpQuestion);
         setFollowUpsAsked((count) => count + 1);
-        speak(`Interesting. I have one follow-up on that. ${follow.followUpQuestion}`, 'FOLLOW_UP', () => startListening('followup'));
+        speak(`I have one follow-up. ${follow.followUpQuestion}`, 'FOLLOW_UP', () => setConversationState('USER_LISTENING'));
         return;
       }
-      await saveAnswer();
+      await saveAnswer(undefined, submitMode);
     } catch (err: any) {
       if (err instanceof ApiError && err.status === 401) logout();
-      await saveAnswer();
+      await saveAnswer(undefined, submitMode);
     }
   }
 
   function handleNoSpeech() {
     if (savingRef.current || submittedRef.current.has(currentQuestionIdRef.current)) return;
     setConversationState('SILENCE_DETECTED');
-    setSilenceAttempts((attempts) => {
-      const nextAttempts = attempts + 1;
-      const text = nextAttempts >= 2
-        ? "No problem, we'll move to the next question."
-        : "I couldn't hear your answer clearly. Could you please repeat that?";
-      speak(text, 'AI_SPEAKING', () => {
-        if (nextAttempts >= 2) saveAnswer();
-        else startListening(activeTargetRef.current);
-      });
-      return nextAttempts;
-    });
+    setSilenceAttempts((attempts) => attempts + 1);
+    pauseAnswerCapture('paused');
+    speak(emptyAnswerTransition, 'AI_SPEAKING', () => setConversationState('USER_LISTENING'));
   }
 
   useEffect(() => {
@@ -422,6 +536,10 @@ const HRInterviewSimulator: React.FC = () => {
   useEffect(() => {
     conversationStateRef.current = conversationState;
   }, [conversationState]);
+
+  useEffect(() => {
+    answerCaptureStateRef.current = answerCaptureState;
+  }, [answerCaptureState]);
 
   useEffect(() => {
     const update = () => setNetwork(getNetworkState());
@@ -459,14 +577,22 @@ const HRInterviewSimulator: React.FC = () => {
             const avg = data.reduce((sum, value) => sum + value, 0) / data.length;
             const level = Math.min(100, Math.round((avg / 90) * 100));
             setAudioLevel(level);
-            if (level > 8) lastSoundAtRef.current = Date.now();
-            if (conversationStateRef.current === 'USER_LISTENING' || conversationStateRef.current === 'USER_SPEAKING') {
+            if (level > 8) {
+              lastSoundAtRef.current = Date.now();
+              if (answerCaptureStateRef.current === 'listening' && silenceTimerRef.current) {
+                window.clearTimeout(silenceTimerRef.current);
+                silenceTimerRef.current = null;
+                scheduleSilenceAutoPause();
+              }
+            }
+            if (answerCaptureStateRef.current === 'listening') {
               if (level < 3) setMediaError("We can't hear you clearly.");
               if (level > 65) highNoiseMsRef.current += 250;
               else highNoiseMsRef.current = Math.max(0, highNoiseMsRef.current - 250);
               if (highNoiseMsRef.current > 3000) {
                 setNoiseWarning('Background noise detected. Please move to a quieter place.');
-                speak('There seems to be some background noise. Please try to sit in a quiet place for a better interview experience.', 'AI_SPEAKING', () => startListening(activeTargetRef.current));
+                pauseAnswerCapture('paused');
+                speak('There seems to be background noise. Please move to a quieter place, then resume your answer.', 'AI_SPEAKING', () => setConversationState('USER_LISTENING'));
                 highNoiseMsRef.current = 0;
               }
             }
@@ -486,7 +612,7 @@ const HRInterviewSimulator: React.FC = () => {
       cleanupAudio();
       stopMedia();
     };
-  }, [cleanupAudio, interview, speak, startListening, stopMedia]);
+  }, [cleanupAudio, interview, pauseAnswerCapture, scheduleSilenceAutoPause, speak, stopMedia]);
 
   useEffect(() => {
     if (!streamRef.current) return;
@@ -497,10 +623,10 @@ const HRInterviewSimulator: React.FC = () => {
     if (!streamRef.current) return;
     streamRef.current.getAudioTracks().forEach((track) => { track.enabled = micEnabled; });
     if (!micEnabled) {
-      try { recognitionRef.current?.stop?.(); } catch {}
+      pauseAnswerCapture('idle');
       setFallbackOpen(true);
     }
-  }, [micEnabled]);
+  }, [micEnabled, pauseAnswerCapture]);
 
   useEffect(() => {
     resetAnswerState();
@@ -519,15 +645,15 @@ const HRInterviewSimulator: React.FC = () => {
       setSecondsLeft((prev) => {
         if (prev <= 1) {
           window.clearInterval(timer);
-          if (activeTargetRef.current === 'followup') saveAnswer();
-          else submitMainAnswer();
+          if (followUpQuestion || activeTargetRef.current === 'followup') saveAnswer(undefined, 'timer');
+          else submitMainAnswer(undefined, 'timer');
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [conversationState, question?.questionId]);
+  }, [conversationState, followUpQuestion, question?.questionId]);
 
   const confirmQuit = async () => {
     if (!interview) return;
@@ -543,20 +669,53 @@ const HRInterviewSimulator: React.FC = () => {
     }
   };
 
-  const statusText =
-    conversationState === 'GREETING' || conversationState === 'AI_SPEAKING' || conversationState === 'FOLLOW_UP'
-      ? 'Speaking'
-      : conversationState === 'USER_SPEAKING'
-        ? 'User speaking'
-        : conversationState === 'USER_LISTENING'
-          ? 'Listening...'
-          : conversationState === 'PROCESSING'
-            ? 'Analyzing your response...'
-            : conversationState === 'SILENCE_DETECTED'
-              ? 'Silence detected'
-              : 'Preparing';
+  const clearCurrentAnswer = () => {
+    if (followUpQuestion || activeTargetRef.current === 'followup') {
+      followUpAnswerRef.current = '';
+      setFollowUpAnswer('');
+    } else {
+      mainAnswerRef.current = '';
+      finalTranscriptRef.current = '';
+      setCurrentTranscript('');
+      setManualAnswer('');
+    }
+    interimTranscriptRef.current = '';
+    setInterimTranscript('');
+    emptyAnswerPromptedRef.current = false;
+  };
+
+  const toggleAnswerCapture = () => {
+    if (answerCaptureState === 'listening') {
+      pauseAnswerCapture('paused');
+      return;
+    }
+    startListening(followUpQuestion ? 'followup' : 'main');
+  };
+
+  const continueInterview = () => {
+    if (followUpQuestion) saveAnswer(followUpAnswer || manualAnswer);
+    else submitMainAnswer(manualAnswer || mainAnswerRef.current || currentTranscript);
+  };
+
+  const answerButtonText =
+    answerCaptureState === 'listening'
+      ? 'Pause Answer'
+      : answerCaptureState === 'paused'
+        ? 'Resume Answer'
+        : 'Start Answer';
+
+  const statusText = (() => {
+    if (conversationState === 'GREETING' || conversationState === 'AI_SPEAKING' || conversationState === 'FOLLOW_UP') return 'Speaking';
+    if (conversationState === 'PROCESSING') return 'Analyzing your response...';
+    if (conversationState === 'SILENCE_DETECTED') return 'Silence detected';
+    if (answerCaptureState === 'listening' && conversationState === 'USER_SPEAKING') return 'User speaking';
+    if (answerCaptureState === 'listening') return 'Listening...';
+    if (answerCaptureState === 'paused') return 'Paused';
+    if (conversationState === 'USER_LISTENING') return 'Ready';
+    return 'Preparing';
+  })();
   const speaking = conversationState === 'GREETING' || conversationState === 'AI_SPEAKING' || conversationState === 'FOLLOW_UP';
-  const listening = conversationState === 'USER_LISTENING' || conversationState === 'USER_SPEAKING';
+  const listening = answerCaptureState === 'listening';
 
   if (!interview) {
     return (
@@ -638,14 +797,25 @@ const HRInterviewSimulator: React.FC = () => {
               <p className="mb-3 text-xs font-black uppercase tracking-widest text-slate-400 dark:text-neutral-500">Current question</p>
               <h2 className="text-2xl font-black leading-snug text-slate-950 dark:text-neutral-100">{question?.question}</h2>
               {speaking && <div className="mt-5 flex h-8 items-end gap-1 text-blue-500">{[10, 18, 24, 15, 28, 12, 22].map((h, i) => <span key={i} className="w-1.5 animate-pulse rounded-full bg-current" style={{ height: `${h}px`, animationDelay: `${i * 80}ms` }} />)}</div>}
-              {listening && <div className="mt-5 text-sm font-bold text-emerald-600 dark:text-emerald-300">Listening naturally. Pause when you are done.</div>}
+              {listening && <div className="mt-5 text-sm font-bold text-emerald-600 dark:text-emerald-300">Listening naturally. Pause when you want to stop capture.</div>}
             </div>
 
             <div key={`${interview.id}-${question?.questionId}`} className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
-              <p className="text-xs font-black uppercase tracking-widest text-slate-400 dark:text-neutral-500">Live transcript</p>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-black uppercase tracking-widest text-slate-400 dark:text-neutral-500">Live transcript</p>
+                <button onClick={clearCurrentAnswer} disabled={saving || speaking} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-40 dark:border-neutral-800 dark:text-neutral-300">Clear</button>
+              </div>
               <p className="mt-2 min-h-[72px] whitespace-pre-wrap text-sm font-semibold leading-relaxed text-slate-700 dark:text-neutral-300">
-                {(manualAnswer || currentTranscript || interimTranscript) || 'Your answer will appear here while you speak.'}
+                {fullAnswer || 'Your answer will appear here while you speak.'}
               </p>
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                <button onClick={toggleAnswerCapture} disabled={saving || speaking || !micEnabled || micBlocked} className="min-h-12 flex-1 rounded-2xl bg-emerald-600 px-4 text-sm font-black text-white transition hover:bg-emerald-700 disabled:opacity-50">
+                  {answerButtonText}
+                </button>
+                <button onClick={continueInterview} disabled={saving || speaking} className="min-h-12 flex-1 rounded-2xl bg-blue-600 px-4 text-sm font-black text-white transition hover:bg-blue-700 disabled:opacity-50">
+                  {saving ? 'Saving...' : followUpQuestion ? 'Continue' : 'Continue'}
+                </button>
+              </div>
             </div>
 
             {followUpQuestion && (
@@ -660,14 +830,22 @@ const HRInterviewSimulator: React.FC = () => {
                 <summary className="cursor-pointer text-sm font-black text-slate-700 dark:text-neutral-200">Manual fallback controls</summary>
                 <div className="mt-4 space-y-3">
                   <div className="flex flex-wrap gap-2">
-                    <button onClick={() => question && speak(question.question, 'AI_SPEAKING', () => startListening('main'))} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black dark:border-neutral-800">Repeat question</button>
+                    <button onClick={() => question && speak(question.question, 'AI_SPEAKING', () => setConversationState('USER_LISTENING'))} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black dark:border-neutral-800">Repeat question</button>
                     <button onClick={() => setIsManualMode((value) => !value)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black dark:border-neutral-800">Type answer manually</button>
-                    <button onClick={() => followUpQuestion ? saveAnswer(followUpAnswer || manualAnswer) : submitMainAnswer(manualAnswer || currentTranscript)} className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white">Continue</button>
+                    <button onClick={continueInterview} className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white">Continue</button>
                   </div>
                   {isManualMode && (
                     <textarea
                       value={followUpQuestion ? followUpAnswer : manualAnswer}
-                      onChange={(e) => followUpQuestion ? setFollowUpAnswer(e.target.value) : setManualAnswer(e.target.value)}
+                      onChange={(e) => {
+                        if (followUpQuestion) {
+                          followUpAnswerRef.current = e.target.value;
+                          setFollowUpAnswer(e.target.value);
+                        } else {
+                          mainAnswerRef.current = e.target.value;
+                          setManualAnswer(e.target.value);
+                        }
+                      }}
                       className="min-h-[120px] w-full rounded-xl border border-slate-200 bg-white p-3 text-sm font-semibold outline-none dark:border-neutral-800 dark:bg-neutral-900"
                       placeholder={followUpQuestion ? 'Type your follow-up answer here.' : 'Type your answer here.'}
                     />

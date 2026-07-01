@@ -4,8 +4,12 @@ import { exec, query } from "../config/db";
 import { ApiError } from "../middleware/error.middleware";
 import { banUserForMonitoringViolation, getUserBanStatus } from "./ban.service";
 
-const MULTIPLE_PERSON_CONFIDENCE = 0.55;
-const PHONE_CONFIDENCE = 0.5;
+const PERSON_CONFIDENCE = 0.7;
+const PHONE_CONFIDENCE = 0.6;
+const MIN_PERSON_AREA_RATIO = 0.12;
+const MIN_PHONE_AREA_RATIO = 0.002;
+const CONSECUTIVE_VIOLATION_CHECKS = 3;
+const NO_CANDIDATE_NOTICE_CHECKS = 3;
 const WARNING_COOLDOWN_MS = 10000;
 const BAN_WARNING_THRESHOLD = 4;
 const BAN_MESSAGE = "Interview stopped due to repeated monitoring violations. You may try again after 3 hours.";
@@ -28,6 +32,15 @@ type Prediction = {
   confidence?: number;
   score?: number;
   probability?: number;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  w?: number;
+  h?: number;
+  box?: { width?: number; height?: number; w?: number; h?: number };
+  bbox?: { width?: number; height?: number; w?: number; h?: number };
+  bounding_box?: { width?: number; height?: number; w?: number; h?: number };
 };
 
 type ProctoringDebugInfo = {
@@ -45,6 +58,9 @@ type InterviewMonitorRow = RowDataPacket & {
 
 type MonitoringState = {
   lastCountedWarningAt: number;
+  consecutiveViolationKey: string;
+  consecutiveViolationCount: number;
+  consecutiveNoCandidateCount: number;
 };
 
 const stateByInterview = new Map<number, MonitoringState>();
@@ -53,9 +69,31 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function getJpegSize(buffer: Buffer) {
+  if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) return null;
+  let offset = 2;
+  while (offset + 9 < buffer.length) {
+    if (buffer[offset] !== 0xff) {
+      offset++;
+      continue;
+    }
+    const marker = buffer[offset + 1];
+    const length = buffer.readUInt16BE(offset + 2);
+    if (length < 2) return null;
+    if ((marker >= 0xc0 && marker <= 0xc3) || (marker >= 0xc5 && marker <= 0xc7) || (marker >= 0xc9 && marker <= 0xcb) || (marker >= 0xcd && marker <= 0xcf)) {
+      return {
+        height: buffer.readUInt16BE(offset + 5),
+        width: buffer.readUInt16BE(offset + 7),
+      };
+    }
+    offset += 2 + length;
+  }
+  return null;
+}
+
 function normalizeFrameToBuffer(frame: unknown) {
   if (Buffer.isBuffer(frame)) {
-    return { buffer: frame, mimeType: "image/jpeg" };
+    return { buffer: frame, mimeType: "image/jpeg", frameSize: getJpegSize(frame) };
   }
 
   if (
@@ -64,7 +102,8 @@ function normalizeFrameToBuffer(frame: unknown) {
     Array.isArray((frame as any).data) &&
     (frame as any).type === "Buffer"
   ) {
-    return { buffer: Buffer.from((frame as any).data), mimeType: "image/jpeg" };
+    const buffer = Buffer.from((frame as any).data);
+    return { buffer, mimeType: "image/jpeg", frameSize: getJpegSize(buffer) };
   }
 
   const value = String(frame ?? "").trim();
@@ -72,10 +111,8 @@ function normalizeFrameToBuffer(frame: unknown) {
   const dataUrlMatch = value.match(/^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i);
   const mimeType = dataUrlMatch ? dataUrlMatch[1] : "image/jpeg";
   const base64 = dataUrlMatch ? dataUrlMatch[2] : value;
-  return {
-    buffer: Buffer.from(base64.replace(/\s/g, ""), "base64"),
-    mimeType,
-  };
+  const buffer = Buffer.from(base64.replace(/\s/g, ""), "base64");
+  return { buffer, mimeType, frameSize: getJpegSize(buffer) };
 }
 
 function normalizeClassName(value: unknown) {
@@ -101,6 +138,27 @@ function getConfidence(prediction: Prediction) {
   const n = Number(prediction.confidence ?? prediction.score ?? prediction.probability);
   if (!Number.isFinite(n)) return 0;
   return n > 1 ? n / 100 : n;
+}
+
+function normalizeDimension(value: unknown, frameDimension?: number | null) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  if (n <= 1 && frameDimension && frameDimension > 1) return n * frameDimension;
+  return n;
+}
+
+function getBoxDimensions(prediction: Prediction, frameSize?: { width: number; height: number } | null) {
+  const box = prediction.box ?? prediction.bbox ?? prediction.bounding_box;
+  const width = normalizeDimension(prediction.width ?? prediction.w ?? box?.width ?? box?.w, frameSize?.width);
+  const height = normalizeDimension(prediction.height ?? prediction.h ?? box?.height ?? box?.h, frameSize?.height);
+  return { width, height };
+}
+
+function getAreaRatio(prediction: Prediction, frameSize?: { width: number; height: number } | null) {
+  if (!frameSize?.width || !frameSize.height) return null;
+  const box = getBoxDimensions(prediction, frameSize);
+  if (!box.width || !box.height) return null;
+  return Math.max(0, Math.min(1, (box.width * box.height) / (frameSize.width * frameSize.height)));
 }
 
 function collectNestedPredictions(value: unknown, out: Prediction[] = []) {
@@ -242,33 +300,61 @@ async function runRoboflowWorkflow(frame: { buffer: Buffer; mimeType: string }) 
   throw new ApiError(502, "Roboflow workflow request failed");
 }
 
-function analyzePredictions(predictions: Prediction[]) {
+function logDetectionDetails(predictions: Prediction[], frameSize?: { width: number; height: number } | null) {
+  for (const prediction of predictions) {
+    const className = getPredictionClass(prediction) || "unknown";
+    const confidence = getConfidence(prediction);
+    const box = getBoxDimensions(prediction, frameSize);
+    const areaRatio = getAreaRatio(prediction, frameSize);
+    console.info("[proctoring] Roboflow detection", {
+      className,
+      confidence,
+      boxWidth: box.width || null,
+      boxHeight: box.height || null,
+      frameWidth: frameSize?.width ?? null,
+      frameHeight: frameSize?.height ?? null,
+      areaPercentage: areaRatio === null ? null : Number((areaRatio * 100).toFixed(2)),
+    });
+  }
+}
+
+function analyzePredictions(predictions: Prediction[], frameSize?: { width: number; height: number } | null) {
   const phoneClasses = new Set(["cell phone", "mobile phone", "phone", "cellphone", "mobile"]);
-  const personCount = predictions.filter(
-    (prediction) =>
-      getPredictionClass(prediction) === "person" &&
-      getConfidence(prediction) >= MULTIPLE_PERSON_CONFIDENCE
-  ).length;
-  const hasPeopleClass = predictions.some(
-    (prediction) =>
-      getPredictionClass(prediction) === "people" &&
-      getConfidence(prediction) >= MULTIPLE_PERSON_CONFIDENCE
-  );
+  if (!Array.isArray(predictions)) {
+    return { violation: false, reason: "", personCount: 0, noCandidate: false };
+  }
+
+  const filteredPersons = predictions.filter((prediction) => {
+    const className = getPredictionClass(prediction);
+    const confidence = getConfidence(prediction);
+    const areaRatio = getAreaRatio(prediction, frameSize);
+    return (
+      (className === "person" || className === "people") &&
+      confidence >= PERSON_CONFIDENCE &&
+      areaRatio !== null &&
+      areaRatio >= MIN_PERSON_AREA_RATIO
+    );
+  });
+
   const hasPhone = predictions.some((prediction) => {
     const className = getPredictionClass(prediction);
+    const areaRatio = getAreaRatio(prediction, frameSize);
     return (
       phoneClasses.has(className) &&
-      getConfidence(prediction) >= PHONE_CONFIDENCE
+      getConfidence(prediction) >= PHONE_CONFIDENCE &&
+      (areaRatio === null || areaRatio >= MIN_PHONE_AREA_RATIO)
     );
   });
 
   const reasons: MonitoringReason[] = [];
-  if (personCount > 1 || hasPeopleClass) reasons.push("Multiple persons detected.");
+  if (filteredPersons.length >= 2) reasons.push("Multiple persons detected.");
   if (hasPhone) reasons.push("Mobile phone detected.");
 
   return {
     violation: reasons.length > 0,
     reason: reasons.join(" "),
+    personCount: filteredPersons.length,
+    noCandidate: filteredPersons.length === 0,
   };
 }
 
@@ -330,25 +416,63 @@ export async function checkProctoringFrame(params: {
     };
   }
 
-  const workflowResult = await runRoboflowWorkflow(normalizeFrameToBuffer(params.frame));
+  const normalizedFrame = normalizeFrameToBuffer(params.frame);
+  const workflowResult = await runRoboflowWorkflow(normalizedFrame);
   const predictions = extractPredictions(workflowResult);
   const debug = createDebugInfo(workflowResult, predictions);
+  logDetectionDetails(predictions, normalizedFrame.frameSize);
   if (env.NODE_ENV !== "production") {
     console.log(
       "PARSED PREDICTIONS:",
       JSON.stringify(predictions, null, 2)
     );
   }
-  const detection = analyzePredictions(predictions);
-  const state = stateByInterview.get(interview.id) ?? { lastCountedWarningAt: 0 };
+  const detection = analyzePredictions(predictions, normalizedFrame.frameSize);
+  const state = stateByInterview.get(interview.id) ?? {
+    lastCountedWarningAt: 0,
+    consecutiveViolationKey: "",
+    consecutiveViolationCount: 0,
+    consecutiveNoCandidateCount: 0,
+  };
 
   if (!detection.violation) {
+    state.consecutiveViolationKey = "";
+    state.consecutiveViolationCount = 0;
+    state.consecutiveNoCandidateCount = detection.noCandidate ? state.consecutiveNoCandidateCount + 1 : 0;
     stateByInterview.set(interview.id, state);
+    if (state.consecutiveNoCandidateCount >= NO_CANDIDATE_NOTICE_CHECKS) {
+      return withDebug({
+        violation: false,
+        warningCount: interview.warning_count ?? 0,
+        banned: false,
+        reason: "No candidate detected.",
+        message: "No candidate detected. Please stay visible in the camera frame.",
+      }, debug);
+    }
     return withDebug({
       violation: false,
       warningCount: interview.warning_count ?? 0,
       banned: false,
       reason: "",
+      message: "",
+    }, debug);
+  }
+
+  state.consecutiveNoCandidateCount = 0;
+  if (state.consecutiveViolationKey === detection.reason) {
+    state.consecutiveViolationCount += 1;
+  } else {
+    state.consecutiveViolationKey = detection.reason;
+    state.consecutiveViolationCount = 1;
+  }
+  stateByInterview.set(interview.id, state);
+
+  if (state.consecutiveViolationCount < CONSECUTIVE_VIOLATION_CHECKS) {
+    return withDebug({
+      violation: true,
+      warningCount: interview.warning_count ?? 0,
+      banned: false,
+      reason: detection.reason,
       message: "",
     }, debug);
   }
@@ -365,6 +489,8 @@ export async function checkProctoringFrame(params: {
   }
 
   state.lastCountedWarningAt = now;
+  state.consecutiveViolationCount = 0;
+  state.consecutiveViolationKey = "";
   stateByInterview.set(interview.id, state);
   const warningCount = (interview.warning_count ?? 0) + 1;
   await exec("UPDATE interviews SET warning_count = ? WHERE id = ?", [warningCount, interview.id]);

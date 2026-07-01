@@ -313,34 +313,41 @@ export function generateRuleBasedFollowUp(input: { question: string; answerText:
   const answer = normalizeText(input.answerText, 4000);
   const words = answer.split(/\s+/).filter(Boolean);
   const category = String(input.category ?? "");
-  if ((input.previousFollowUpCount ?? 0) >= 2 || isMeaninglessAnswer(answer)) {
+  if ((input.previousFollowUpCount ?? 0) >= 3 || isMeaninglessAnswer(answer) || words.length < 8) {
     return { followUpQuestion: null, reason: "Follow-up not useful for this answer." };
   }
-  if (words.length < 25) {
+  const hasExample = /\b(example|project|situation|when|once|during|in my|at my|college|internship|work)\b/i.test(answer);
+  const hasOutcome = /\b(result|outcome|impact|learned|improved|resolved|achieved|completed|success)\b/i.test(answer);
+  const hasOwnership = /\b(i|my|me|we|my role|i handled|i contributed|i learned|i led|i worked|i managed|i built|i resolved)\b/i.test(answer);
+  const needsClarification = words.length < 45 || !hasExample || !hasOutcome || !hasOwnership;
+  if (!needsClarification) {
+    return { followUpQuestion: null, reason: "The answer is complete enough to continue." };
+  }
+  if (words.length < 25 || !hasExample) {
     return {
       followUpQuestion: "Could you explain that with one specific example?",
       reason: "The answer needs more evidence.",
     };
   }
-  if (!/\b(i|my role|i handled|i contributed|i learned|i led|i worked|i managed|i built|i resolved)\b/i.test(answer)) {
+  if (!hasOwnership) {
     return { followUpQuestion: "What was your exact role in that situation?", reason: "The answer needs clearer ownership." };
   }
-  if (/conflict/i.test(category)) {
+  if (/conflict/i.test(category) && !/professional|calm|listen|respect|resolved|discuss/i.test(answer)) {
     return { followUpQuestion: "How did you make sure the relationship stayed professional?", reason: "Conflict answers should show professionalism." };
   }
-  if (/team collaboration/i.test(category)) {
+  if (/team collaboration/i.test(category) && !/contribution|helped|supported|coordinated|shared/i.test(answer)) {
     return { followUpQuestion: "How did your contribution help the team succeed?", reason: "Teamwork answers should show contribution." };
   }
-  if (/leadership|culture/i.test(category)) {
+  if (/leadership|culture/i.test(category) && !/decision|guided|led|owned|responsibility/i.test(answer)) {
     return { followUpQuestion: "How did your decision affect the team?", reason: "Leadership answers should show impact." };
   }
-  if (/career goals/i.test(category)) {
+  if (/career goals/i.test(category) && !/plan|steps|learning|improve|prepare|goal/i.test(answer)) {
     return { followUpQuestion: "What steps are you taking to reach that goal?", reason: "Career answers should show action." };
   }
-  if (/motivation|intro/i.test(category)) {
+  if (/motivation|intro/i.test(category) && !/role|company|opportunity|interest|skills/i.test(answer)) {
     return { followUpQuestion: "Why does this role specifically interest you?", reason: "Motivation answers should connect to the role." };
   }
-  if (!/\b(result|outcome|impact|learned|improved|resolved|achieved)\b/i.test(answer)) {
+  if (!hasOutcome) {
     return {
       followUpQuestion: "What was the final outcome, and what did you learn from that situation?",
       reason: "The answer is missing outcome or learning.",
@@ -352,10 +359,7 @@ export function generateRuleBasedFollowUp(input: { question: string; answerText:
       reason: "The answer can show interpersonal communication more clearly.",
     };
   }
-  return {
-    followUpQuestion: "If you faced the same situation again, what would you do differently?",
-    reason: "This checks reflection and growth mindset.",
-  };
+  return { followUpQuestion: null, reason: "No follow-up needed." };
 }
 
 async function getInterviewOrThrow(interviewId: number, userId: number) {

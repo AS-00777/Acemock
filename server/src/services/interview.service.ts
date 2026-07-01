@@ -142,7 +142,7 @@ type ColumnRow = RowDataPacket & { Field: string };
 type ResultRow = RowDataPacket & {
   id: number;
   interview_id: number;
-  overall_score: number;
+  overall_score: number | null;
   summary: string;
   question_wise_results: any;
   recommended_focus_areas: any;
@@ -1018,6 +1018,10 @@ export async function completeInterview(params: {
   summary?: string;
 }) {
   const interview = await getInterviewOrThrow(params.interviewId, params.userId);
+  console.info("[interview-evaluation] complete started", {
+    interviewId: interview.id,
+    userId: params.userId,
+  });
   const transcriptSelect = await answerColumnSelect("transcript");
   const correctedTranscriptSelect = await answerColumnSelect("corrected_transcript");
 
@@ -1098,6 +1102,13 @@ export async function completeInterview(params: {
       };
     });
 
+  console.info("[interview-evaluation] Q&A rows prepared", {
+    interviewId: interview.id,
+    qaRowCount: qaRows.length,
+    evaluationAnswerCount: answersToEvaluate.length,
+    answerIds: answersToEvaluate.map((answer) => answer.answerId),
+  });
+
   for (const answer of answersToEvaluate) {
     if (isEmptyInterviewAnswer(answer.userAnswer)) {
       await updateAnswerFields(answer.answerId, {
@@ -1163,8 +1174,20 @@ export async function completeInterview(params: {
     techStack: interview.tech_stack,
     answers: answersToEvaluate,
     personality: interview.personality,
+    interviewId: interview.id,
   });
 
+  if (!batchEvaluation.evaluationAvailable) {
+    console.warn("[interview-evaluation] evaluation marked unavailable; continuing with returned evaluations", {
+      interviewId: interview.id,
+      reason: batchEvaluation.failureReason ?? "Unknown evaluation failure",
+      qaRowCount: qaRows.length,
+      evaluationAnswerCount: answersToEvaluate.length,
+      returnedEvaluationCount: batchEvaluation.evaluations.length,
+    });
+  }
+
+  let answersUpdated = 0;
   for (const evaluation of batchEvaluation.evaluations) {
     await updateAnswerFields(evaluation.answerId, {
       score: evaluation.score,
@@ -1185,7 +1208,14 @@ export async function completeInterview(params: {
       rating: evaluation.rating,
       suggestions: evaluation.suggestions,
     });
+    answersUpdated++;
   }
+
+  console.info("[interview-evaluation] answers updated", {
+    interviewId: interview.id,
+    answersUpdated,
+    source: batchEvaluation.source ?? "AI",
+  });
 
   const scores100 = batchEvaluation.evaluations.map((evaluation) => evaluation.finalScore);
   const overallScore = scores100.length
@@ -1216,11 +1246,22 @@ export async function completeInterview(params: {
       JSON.stringify(recommendedFocusAreas),
       interview.id,
     ]);
+    console.info("[interview-evaluation] result row updated", {
+      interviewId: interview.id,
+      resultId: existing[0].id,
+      overallScore,
+      source: batchEvaluation.source ?? "AI",
+    });
   } else {
     await exec(
       "INSERT INTO results (interview_id, overall_score, summary, question_wise_results, recommended_focus_areas, created_at) VALUES (?, ?, ?, ?, ?, NOW())",
       [interview.id, overallScore, summary, JSON.stringify(questionWiseResults), JSON.stringify(recommendedFocusAreas)]
     );
+    console.info("[interview-evaluation] result row created", {
+      interviewId: interview.id,
+      overallScore,
+      source: batchEvaluation.source ?? "AI",
+    });
   }
 
   await exec("UPDATE interviews SET status = 'COMPLETED', completed_at = NOW() WHERE id = ?", [interview.id]);

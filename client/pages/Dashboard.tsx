@@ -1097,7 +1097,7 @@ const Dashboard: React.FC = () => {
                                 </div>
                               </div>
                               <span className="w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">{getInterviewSourceLabel(item)}</span>
-                              <div className="whitespace-nowrap text-sm font-black text-slate-700 dark:text-neutral-300">{item?.result?.overallScore ?? 0}% · {completed ? 'Completed' : 'In Progress'}</div>
+                              <div className="whitespace-nowrap text-sm font-black text-slate-700 dark:text-neutral-300">{completed ? 'Completed' : 'In Progress'}</div>
                               {completed ? (
                                 <Link to={`/result/${item.id}`} className="inline-flex min-h-10 w-full items-center justify-center rounded-xl bg-slate-900 px-4 text-xs font-black uppercase tracking-widest text-white transition hover:bg-blue-600 dark:bg-neutral-800 dark:hover:bg-blue-500">View Analysis</Link>
                               ) : (

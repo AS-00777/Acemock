@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { api, ApiError } from '../services/api';
@@ -52,7 +52,7 @@ type InterviewDetails = {
       }>;
     }>;
     result: null | {
-      overallScore: number;
+      overallScore: number | null;
       summary: string;
       createdAt: string;
     };
@@ -159,19 +159,22 @@ const Result: React.FC = () => {
   const [data, setData] = useState<InterviewDetails | null>(null);
   const [retryingEvaluation, setRetryingEvaluation] = useState(false);
 
-  useEffect(() => {
+  const fetchDetails = useCallback(async () => {
     if (!Number.isFinite(interviewId) || interviewId <= 0) return;
-    api
-      .get<InterviewDetails>(`/interview/${interviewId}`)
-      .then(setData)
-      .catch((err) => {
-        if (err instanceof ApiError && err.status === 401) logout();
-      });
+    try {
+      setData(await api.get<InterviewDetails>(`/interview/${interviewId}`));
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) logout();
+    }
   }, [interviewId, logout]);
+
+  useEffect(() => {
+    fetchDetails();
+  }, [fetchDetails]);
 
   const viewModel = useMemo(() => {
     if (!data) return null;
-    const overallScore = data.interview.result?.overallScore ?? 0;
+    const overallScore = typeof data.interview.result?.overallScore === 'number' ? data.interview.result.overallScore : null;
     const summary = data.interview.result?.summary ?? (data.interview.status === 'COMPLETED' ? '' : 'Interview is still in progress.');
     const transcript = data.interview.questions
       .map((q) => {
@@ -190,7 +193,7 @@ const Result: React.FC = () => {
           rawTranscript: a.rawTranscript ?? undefined,
           correctedTranscript: a.correctedTranscript ?? undefined,
           feedback: emptyAnswer ? 'No answer was provided, so this question could not be evaluated.' : a.feedback ?? undefined,
-          score: emptyAnswer ? 0 : a.finalScore ?? (a.score === null ? 0 : a.score * 10),
+          score: emptyAnswer ? 0 : a.finalScore ?? (a.score === null ? null : a.score * 10),
           type: q.type ?? 'theory',
           factorScores: emptyAnswer ? (q.type === 'coding' ? zeroCodingFactors : zeroTheoryFactors) : a.factorScores ?? null,
           matchedConcepts: emptyAnswer ? [] : a.matchedConcepts ?? [],
@@ -208,18 +211,32 @@ const Result: React.FC = () => {
       })
       .filter(Boolean) as Array<any>;
 
-    const safeOverallScore = transcript.length
-      ? Math.round(transcript.reduce((sum, item) => sum + Number(item.score || 0), 0) / transcript.length)
-      : overallScore;
+    const scoredTranscript = transcript.filter((item) => typeof item.score === 'number');
+    const averagedScore = scoredTranscript.length
+      ? Math.round(scoredTranscript.reduce((sum, item) => sum + Number(item.score), 0) / scoredTranscript.length)
+      : null;
+    const safeOverallScore = overallScore ?? averagedScore;
+    const hasFailedFeedback = transcript.some((item) => /Evaluation (unavailable|failed)/i.test(String(item.feedback ?? '')))
+      || /Evaluation failed/i.test(summary);
+    const evaluationPending = data.interview.status !== 'COMPLETED'
+      || (data.interview.status === 'COMPLETED' && safeOverallScore === null && !hasFailedFeedback);
+    const evaluationUnavailable = hasFailedFeedback || (data.interview.status === 'COMPLETED' && safeOverallScore === null && !evaluationPending);
     return {
       date: data.interview.createdAt,
       score: safeOverallScore,
-      feedback: summary,
+      feedback: evaluationPending ? 'Evaluation in progress.' : evaluationUnavailable ? 'Evaluation failed, please retry evaluation.' : summary,
       transcript,
-      overallRating: Math.round((safeOverallScore / 100) * 5),
-      evaluationUnavailable: transcript.some((item) => String(item.feedback ?? '').includes('Evaluation unavailable')),
+      overallRating: safeOverallScore === null ? 0 : Math.round((safeOverallScore / 100) * 5),
+      evaluationPending,
+      evaluationUnavailable,
     };
   }, [data]);
+
+  useEffect(() => {
+    if (!viewModel?.evaluationPending) return;
+    const timer = window.setInterval(fetchDetails, 2500);
+    return () => window.clearInterval(timer);
+  }, [fetchDetails, viewModel?.evaluationPending]);
 
   if (!viewModel) {
     return (
@@ -240,7 +257,7 @@ const Result: React.FC = () => {
     setRetryingEvaluation(true);
     try {
       await api.post(`/interview/${interviewId}/retry-evaluation`, {});
-      setData(await api.get<InterviewDetails>(`/interview/${interviewId}`));
+      await fetchDetails();
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) logout();
     } finally {
@@ -259,7 +276,7 @@ const Result: React.FC = () => {
           </div>
           <div className="w-full sm:w-auto bg-white dark:bg-neutral-900 p-5 sm:p-6 rounded-3xl shadow-xl shadow-blue-50 dark:shadow-none border border-gray-100 dark:border-neutral-800 flex items-center justify-between sm:justify-start gap-6 sm:gap-8 sm:px-10 transition-colors">
             <div className="text-center">
-              <div className={`text-5xl font-black mb-1 ${getScoreColor(viewModel.score)}`}>{viewModel.score}%</div>
+              <div className={`text-5xl font-black mb-1 ${viewModel.score === null ? 'text-red-600 dark:text-red-400' : getScoreColor(viewModel.score)}`}>{viewModel.score === null ? 'N/A' : `${viewModel.score}%`}</div>
               <div className="text-xs font-bold text-gray-400 dark:text-neutral-400 uppercase tracking-widest">Total Score</div>
             </div>
             <div className="h-12 w-px bg-gray-100 dark:bg-neutral-800"></div>
@@ -280,7 +297,7 @@ const Result: React.FC = () => {
             <span className="bg-blue-600 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm">✓</span>
             Overall AI Feedback
           </h2>
-          {viewModel.evaluationUnavailable && (
+          {viewModel.evaluationUnavailable && !viewModel.evaluationPending && (
             <button onClick={retryEvaluation} disabled={retryingEvaluation} className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-black uppercase tracking-widest text-white disabled:opacity-60">
               {retryingEvaluation ? 'Retrying evaluation...' : 'Retry evaluation'}
             </button>
@@ -435,7 +452,7 @@ const Result: React.FC = () => {
                   )}
                   <div className="mt-auto pt-5 border-t border-blue-100 dark:border-neutral-800 flex flex-wrap items-center justify-between gap-3 relative z-10">
                     <span className="text-sm font-black text-slate-400 dark:text-neutral-400 uppercase tracking-widest">Item Score</span>
-                    <span className="text-3xl font-black text-blue-600 dark:text-blue-400">{item.score || 0}/100</span>
+                    <span className="text-3xl font-black text-blue-600 dark:text-blue-400">{typeof item.score === 'number' ? `${item.score}/100` : 'N/A'}</span>
                   </div>
                   <div className="absolute top-0 right-0 w-24 h-24 bg-blue-100/20 dark:bg-blue-400/10 rounded-bl-[4rem]"></div>
                 </aside>

@@ -251,6 +251,7 @@ function getProctoringToastStyle(warningCount: number, banned: boolean): Proctor
 
 function getPrimaryProctoringReason(reason: string) {
   const normalized = reason.toLowerCase();
+  if (normalized.includes("no candidate")) return "No candidate detected.";
   if (normalized.includes("mobile") || normalized.includes("phone")) return "Mobile phone detected.";
   if (normalized.includes("multiple") || normalized.includes("person")) return "Multiple persons detected.";
   return reason.trim() || "Monitoring violation detected.";
@@ -266,6 +267,9 @@ function getProctoringDisplayMessage(reason: string, warningCount: number, banne
   }
 
   const primaryReason = getPrimaryProctoringReason(reason);
+  if (primaryReason === "No candidate detected.") {
+    return "No candidate detected. Please stay visible in the camera frame.";
+  }
   if (primaryReason === "Mobile phone detected.") {
     return `⚠️ Warning ${warningCount}: Mobile phone detected. Please do not use mobile phone during the interview.`;
   }
@@ -284,6 +288,9 @@ function getProctoringVoiceMessage(reason: string, warningCount: number, banned:
   }
 
   const primaryReason = getPrimaryProctoringReason(reason);
+  if (primaryReason === "No candidate detected.") {
+    return "Please stay visible in the camera frame.";
+  }
   if (primaryReason === "Mobile phone detected.") {
     return "Please do not use mobile phone while giving the interview.";
   }
